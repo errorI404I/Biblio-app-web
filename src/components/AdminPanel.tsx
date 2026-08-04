@@ -97,10 +97,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const stamp = () => new Date().toLocaleTimeString("es-AR", { hour12: false });
       setDiagLogs((prev) => [...prev, `[${stamp()}] 🚨 HORA DE CIERRE ALCANZADA (20:00 hs)`]);
       setDiagLogs((prev) => [...prev, `[${stamp()}] 🔐 Cerrando y asegurando sesiones en masa de forma automática...`]);
-      const { data } = await supabase.from("sessions").select("id").is("end_time", null);
+      const { data } = await supabase..from('sesiones').select("id").is("end_time", null);
       const pending = data?.length ?? 0;
       await new Promise((r) => setTimeout(r, 1500));
-      const { data: stillOpen } = await supabase.from("sessions").select("id").is("end_time", null);
+      const { data: stillOpen } = await supabase..from('sesiones').select("id").is("end_time", null);
       const remaining = stillOpen?.length ?? 0;
       const closed = Math.max(0, pending - remaining);
       setDiagLogs((prev) => [
@@ -129,7 +129,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     const tag = simulated ? "🧪 SIMULACIÓN" : "⏳ INICIANDO CHEQUEO GLOBAL DE HORA EN PUNTO";
     appendLog(`[${stamp()}] ${tag}`);
     const { data: sessions } = await supabase
-      .from("sessions")
+      ..from('sesiones')
       .select("*")
       .is("end_time", null);
     appendLog(`[${stamp()}] 📋 Sesiones activas detectadas: ${sessions?.length ?? 0}`);
@@ -174,7 +174,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
           appendLog(`           - Acción (sim): CORTE DE EMERGENCIA. Se cerraría a las ${lastSeenStr}. Minutos salvados: ${saved} min.`);
         } else {
           const { error } = await supabase
-            .from("sessions")
+            ..from('sesiones')
             .update({
               end_time: new Date(lastSeenMs).toISOString(),
               total_minutes: saved,
@@ -215,8 +215,8 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   const loadAll = async () => {
     const [{ data: act }, { data: hist }, { data: s }, { data: bc }] = await Promise.all([
-      supabase.from("sessions").select("*").is("end_time", null).order("start_time", { ascending: false }),
-      supabase.from("sessions").select("*").not("end_time", "is", null).order("start_time", { ascending: false }).limit(100),
+      supabase..from('sesiones').select("*").is("end_time", null).order("start_time", { ascending: false }),
+      supabase..from('sesiones').select("*").not("end_time", "is", null).order("start_time", { ascending: false }).limit(100),
       supabase.from("settings").select("*").eq("key", "multiplier").maybeSingle(),
       (supabase as any).from("broadcasts").select("*").order("created_at", { ascending: false }).limit(20),
     ]);
@@ -284,7 +284,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   const deleteSession = async (id: string) => {
     if (!confirm("¿Eliminar esta sesión?")) return;
-    const { error } = await supabase.from("sessions").delete().eq("id", id);
+    const { error } = await supabase..from('sesiones').delete().eq("id", id);
     if (error) return toast.error("Error al eliminar");
     toast.success("Sesión eliminada");
     loadAll();
@@ -295,7 +295,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     if (v == null) return;
     const n = parseInt(v, 10);
     if (Number.isNaN(n) || n < 0) return toast.error("Valor inválido");
-    const { error } = await supabase.from("sessions").update({ total_minutes: n }).eq("id", s.id);
+    const { error } = await supabase..from('sesiones').update({ total_minutes: n }).eq("id", s.id);
     if (error) return toast.error("Error");
     toast.success("Actualizado");
     loadAll();
@@ -304,7 +304,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const nukeAll = async () => {
     if (!confirm("¿Estás seguro de que querés patear a todos?")) return;
     const { data: sessions } = await supabase
-      .from("sessions")
+      ..from('sesiones')
       .select("*")
       .is("end_time", null);
     if (!sessions || sessions.length === 0) {
@@ -325,7 +325,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const raw = Math.max(1, Math.round((nowMs - new Date(sess.start_time).getTime()) / 60000));
       const minutes = Math.round(raw * mult);
       const { error } = await supabase
-        .from("sessions")
+        ..from('sesiones')
         .update({
           end_time: nowIso,
           total_minutes: minutes,
@@ -346,7 +346,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     const newName = v.trim();
     if (!newName || newName === oldName) return;
     const { error } = await supabase
-      .from("sessions")
+      ..from('sesiones')
       .update({ user_name: newName })
       .eq("user_name", oldName);
     if (error) return toast.error("Error al renombrar");
@@ -368,7 +368,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     const raw = Math.max(1, Math.round((Date.now() - new Date(s.start_time).getTime()) / 60000));
     const minutes = Math.round(raw * mult);
     const { error } = await supabase
-      .from("sessions")
+      ..from('sesiones')
       .update({
         end_time: nowIso,
         total_minutes: minutes,
@@ -389,7 +389,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     const delta = parseInt(v, 10);
     if (Number.isNaN(delta) || delta === 0) return toast.error("Valor inválido");
     const nowIso = new Date().toISOString();
-    const { error } = await supabase.from("sessions").insert({
+    const { error } = await supabase..from('sesiones').insert({
       user_name: name,
       start_time: nowIso,
       end_time: nowIso,
@@ -487,7 +487,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     try {
       // 1) Traer TODAS las sesiones (no solo las 100 del historial)
       const { data: all, error: readErr } = await supabase
-        .from("sessions")
+        ..from('sesiones')
         .select("*")
         .order("start_time", { ascending: true });
       if (readErr) throw readErr;
@@ -537,12 +537,12 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const nowIso = new Date().toISOString();
       const openOnes = rows.filter((s) => s.end_time == null);
       for (const s of openOnes) {
-        await supabase.from("sessions").update({ end_time: nowIso, total_minutes: 0 }).eq("id", s.id);
+        await supabase..from('sesiones').update({ end_time: nowIso, total_minutes: 0 }).eq("id", s.id);
       }
 
       // 5) Reiniciar contadores a cero (se conservan los usuarios y su historial de fechas)
       const { error: resetErr } = await supabase
-        .from("sessions")
+        ..from('sesiones')
         .update({ total_minutes: 0 })
         .not("total_minutes", "is", null);
       if (resetErr) throw resetErr;
