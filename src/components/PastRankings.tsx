@@ -5,7 +5,13 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Archive, Loader2, Trash2, Trophy, Upload } from "lucide-react";
+import { Archive, Calendar, Loader2, Trash2, Trophy, Upload } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 export type PastRanking = {
   id: string;
@@ -33,11 +39,11 @@ function guessKeys(rows: Record<string, unknown>[]) {
   return Array.from(keys);
 }
 
-/** Tabla de solo lectura con la estética del ranking en vivo (sin indicadores online). */
+/** Tabla de solo lectura responsiva (ajustada para mobile y web). */
 export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
   const rows = Array.isArray(ranking.rows) ? ranking.rows : [];
   if (rows.length === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">Este ranking no tiene datos.</p>;
+    return <p className="py-6 text-center text-sm text-muted-foreground">Este ranking no tiene datos.</p>;
   }
   const keys = guessKeys(rows);
   const posKey = keys.find((k) => /pos|#|puesto|rank/i.test(k));
@@ -45,37 +51,60 @@ export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
   const restKeys = keys.filter((k) => k !== posKey && k !== nameKey);
 
   return (
-    <ul className="divide-y divide-border">
-      {rows.map((r, i) => (
-        <li key={i} className="flex items-center justify-between gap-3 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <span
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                i === 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {posKey ? String(r[posKey] ?? i + 1) : i + 1}
-            </span>
-            <span className="truncate font-medium">{String(r[nameKey] ?? "—")}</span>
-          </div>
-          <div className="flex shrink-0 flex-wrap justify-end gap-x-3 gap-y-1 text-right">
-            {restKeys.map((k) => (
-              <span key={k} className="font-mono tabular-nums text-xs text-muted-foreground">
-                <span className="mr-1 font-sans text-[10px] uppercase opacity-70">{k}</span>
-                {String(r[k] ?? "")}
+    <ul className="divide-y divide-border/40 space-y-1">
+      {rows.map((r, i) => {
+        const position = posKey ? String(r[posKey] ?? i + 1) : i + 1;
+        
+        return (
+          <li key={i} className="flex items-center justify-between gap-3 py-2 px-1 rounded-lg hover:bg-muted/20 transition-colors">
+            {/* LADO IZQUIERDO: Posición + Nombre */}
+            <div className="flex min-w-0 items-center gap-3">
+              {/* Círculo de posición fijo sin solapamiento */}
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  i === 0
+                    ? "bg-amber-400 text-slate-950"
+                    : i === 1
+                    ? "bg-slate-300 text-slate-950"
+                    : i === 2
+                    ? "bg-amber-700 text-white"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {position}
               </span>
-            ))}
-          </div>
-        </li>
-      ))}
+              <span className="truncate text-sm font-medium text-foreground">
+                {String(r[nameKey] ?? "—")}
+              </span>
+            </div>
+
+            {/* LADO DERECHO: Métricas (se ocultan campos secundarios en pantallas muy chicas) */}
+            <div className="flex shrink-0 items-center gap-2 text-right">
+              {restKeys.map((k) => {
+                const isIpOrStreak = /ip|racha|conexion/i.test(k);
+                return (
+                  <span
+                    key={k}
+                    className={`font-mono text-xs tabular-nums text-muted-foreground ${
+                      isIpOrStreak ? "hidden sm:inline-block" : ""
+                    }`}
+                  >
+                    <span className="mr-1 font-sans text-[9px] uppercase opacity-60">{k}:</span>
+                    {String(r[k] ?? "")}
+                  </span>
+                );
+              })}
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
-/** Vista pública: selector de temporada + tabla histórica. */
+/** Vista pública: Acordeón desplegable con los rankings históricos. */
 export function PastRankingsPublic() {
   const [items, setItems] = useState<PastRanking[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -83,7 +112,6 @@ export function PastRankingsPublic() {
     fetchPastRankings().then((d) => {
       if (!alive) return;
       setItems(d);
-      setSelected((s) => s ?? d[0]?.id ?? null);
       setLoading(false);
     });
     return () => {
@@ -108,31 +136,39 @@ export function PastRankingsPublic() {
     );
   }
 
-  const current = items.find((i) => i.id === selected) ?? items[0];
-
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex items-center gap-2">
+    <Card className="p-4 sm:p-5">
+      <div className="mb-4 flex items-center gap-2 border-b border-border/50 pb-3">
         <Trophy className="h-5 w-5 text-primary" />
         <h2 className="text-lg font-semibold">Temporadas pasadas</h2>
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {items.map((it) => (
-          <Button
-            key={it.id}
-            size="sm"
-            variant={it.id === current.id ? "default" : "outline"}
-            className="text-xs"
-            onClick={() => setSelected(it.id)}
+
+      {/* ACORDEÓN DESPLEGABLE */}
+      <Accordion type="single" collapsible className="w-full space-y-2">
+        {items.map((item) => (
+          <AccordionItem
+            key={item.id}
+            value={item.id}
+            className="border border-border/60 rounded-xl px-3 sm:px-4 overflow-hidden bg-card"
           >
-            {it.title}
-          </Button>
+            <AccordionTrigger className="hover:no-underline py-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full text-left gap-1 pr-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-primary shrink-0" />
+                  <span className="font-semibold text-sm sm:text-base">{item.title}</span>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  Archivado el {new Date(item.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </AccordionTrigger>
+
+            <AccordionContent className="pt-2 pb-4 border-t border-border/40">
+              <PastRankingTable ranking={item} />
+            </AccordionContent>
+          </AccordionItem>
         ))}
-      </div>
-      <p className="mb-2 text-xs text-muted-foreground">
-        Archivado el {new Date(current.created_at).toLocaleDateString()} · solo lectura
-      </p>
-      <PastRankingTable ranking={current} />
+      </Accordion>
     </Card>
   );
 }
