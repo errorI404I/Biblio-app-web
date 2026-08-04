@@ -39,66 +39,83 @@ function guessKeys(rows: Record<string, unknown>[]) {
   return Array.from(keys);
 }
 
-/** Tabla de solo lectura responsiva (ajustada para mobile y web). */
+/** Tabla de solo lectura responsiva con diseño limpio de tarjetas/badges */
 export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
   const rows = Array.isArray(ranking.rows) ? ranking.rows : [];
   if (rows.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">Este ranking no tiene datos.</p>;
   }
   const keys = guessKeys(rows);
+  
+  // Identificamos las claves principales del Excel
   const posKey = keys.find((k) => /pos|#|puesto|rank/i.test(k));
   const nameKey = keys.find((k) => /nombre|usuario|user|name|jugador/i.test(k)) ?? keys[0];
-  const restKeys = keys.filter((k) => k !== posKey && k !== nameKey);
+  const minutesKey = keys.find((k) => /minuto|tiempo|total|horas/i.test(k));
+  const restKeys = keys.filter((k) => k !== posKey && k !== nameKey && k !== minutesKey);
 
   return (
-    <ul className="divide-y divide-border/40 space-y-1">
+    <div className="space-y-2 pt-2">
       {rows.map((r, i) => {
         const position = posKey ? String(r[posKey] ?? i + 1) : i + 1;
-        
+        const mainValue = minutesKey ? String(r[minutesKey] ?? "") : null;
+
         return (
-          <li key={i} className="flex items-center justify-between gap-3 py-2 px-1 rounded-lg hover:bg-muted/20 transition-colors">
+          <div
+            key={i}
+            className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-slate-900/40 border border-slate-800/60 gap-2"
+          >
             {/* LADO IZQUIERDO: Posición + Nombre */}
-            <div className="flex min-w-0 items-center gap-3">
-              {/* Círculo de posición fijo sin solapamiento */}
+            <div className="flex items-center gap-3 min-w-0">
+              {/* Círculo de Posición */}
               <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   i === 0
-                    ? "bg-amber-400 text-slate-950"
+                    ? "bg-amber-400 text-slate-950 shadow-sm shadow-amber-500/20"
                     : i === 1
                     ? "bg-slate-300 text-slate-950"
                     : i === 2
                     ? "bg-amber-700 text-white"
-                    : "bg-muted text-muted-foreground"
+                    : "bg-slate-800 text-slate-300"
                 }`}
               >
                 {position}
               </span>
-              <span className="truncate text-sm font-medium text-foreground">
+
+              {/* Nombre de usuario */}
+              <span className="truncate text-sm font-semibold text-white">
                 {String(r[nameKey] ?? "—")}
               </span>
             </div>
 
-            {/* LADO DERECHO: Métricas (se ocultan campos secundarios en pantallas muy chicas) */}
-            <div className="flex shrink-0 items-center gap-2 text-right">
+            {/* LADO DERECHO: Métricas en Badges */}
+            <div className="flex flex-wrap items-center justify-end gap-2 pl-11 sm:pl-0">
+              {/* Métrica principal (Minutos/Tiempo) */}
+              {mainValue && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <span className="mr-1 text-[10px] uppercase text-indigo-300/60 font-sans">Minutos:</span>
+                  {mainValue}
+                </span>
+              )}
+
+              {/* Columnas dinámicas secundarias (IP, Racha, etc.) */}
               {restKeys.map((k) => {
-                const isIpOrStreak = /ip|racha|conexion/i.test(k);
+                const val = String(r[k] ?? "");
+                if (!val) return null;
                 return (
                   <span
                     key={k}
-                    className={`font-mono text-xs tabular-nums text-muted-foreground ${
-                      isIpOrStreak ? "hidden sm:inline-block" : ""
-                    }`}
+                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono text-slate-400 bg-slate-800/50 border border-slate-700/40"
                   >
-                    <span className="mr-1 font-sans text-[9px] uppercase opacity-60">{k}:</span>
-                    {String(r[k] ?? "")}
+                    <span className="mr-1 text-[9px] uppercase text-slate-500 font-sans">{k}:</span>
+                    {val}
                   </span>
                 );
               })}
             </div>
-          </li>
+          </div>
         );
       })}
-    </ul>
+    </div>
   );
 }
 
