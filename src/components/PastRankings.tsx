@@ -39,7 +39,7 @@ function guessKeys(rows: Record<string, unknown>[]) {
   return Array.from(keys);
 }
 
-/** Tabla de solo lectura responsiva con diseño limpio de tarjetas/badges */
+/** Tabla de solo lectura responsiva: Muestra solo Nombre y Tiempo (omite IP y Racha) */
 export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
   const rows = Array.isArray(ranking.rows) ? ranking.rows : [];
   if (rows.length === 0) {
@@ -51,7 +51,6 @@ export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
   const posKey = keys.find((k) => /pos|#|puesto|rank/i.test(k));
   const nameKey = keys.find((k) => /nombre|usuario|user|name|jugador/i.test(k)) ?? keys[0];
   const minutesKey = keys.find((k) => /minuto|tiempo|total|horas/i.test(k));
-  const restKeys = keys.filter((k) => k !== posKey && k !== nameKey && k !== minutesKey);
 
   return (
     <div className="space-y-2 pt-2">
@@ -62,7 +61,7 @@ export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
         return (
           <div
             key={i}
-            className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-slate-900/40 border border-slate-800/60 gap-2"
+            className="flex items-center justify-between p-3 rounded-lg bg-slate-900/40 border border-slate-800/60 gap-3"
           >
             {/* LADO IZQUIERDO: Posición + Nombre */}
             <div className="flex items-center gap-3 min-w-0">
@@ -87,31 +86,15 @@ export function PastRankingTable({ ranking }: { ranking: PastRanking }) {
               </span>
             </div>
 
-            {/* LADO DERECHO: Métricas en Badges */}
-            <div className="flex flex-wrap items-center justify-end gap-2 pl-11 sm:pl-0">
-              {/* Métrica principal (Minutos/Tiempo) */}
-              {mainValue && (
+            {/* LADO DERECHO: Únicamente la Métrica de Tiempo */}
+            {mainValue && (
+              <div className="shrink-0 text-right">
                 <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  <span className="mr-1 text-[10px] uppercase text-indigo-300/60 font-sans">Minutos:</span>
+                  <span className="mr-1 text-[10px] uppercase text-indigo-300/60 font-sans">Tiempo:</span>
                   {mainValue}
                 </span>
-              )}
-
-              {/* Columnas dinámicas secundarias (IP, Racha, etc.) */}
-              {restKeys.map((k) => {
-                const val = String(r[k] ?? "");
-                if (!val) return null;
-                return (
-                  <span
-                    key={k}
-                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono text-slate-400 bg-slate-800/50 border border-slate-700/40"
-                  >
-                    <span className="mr-1 text-[9px] uppercase text-slate-500 font-sans">{k}:</span>
-                    {val}
-                  </span>
-                );
-              })}
-            </div>
+              </div>
+            )}
           </div>
         );
       })}
