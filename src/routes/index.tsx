@@ -103,7 +103,7 @@ async function closeSessionAt(sessionId: string, startTime: string, endIso: stri
   const ev = await getActiveMultiplier();
   const minutes = Math.round(rawMinutes * ev.multiplier);
   await supabase
-    ..from('sesiones')
+    .from('sesiones')
     .update({
       end_time: endIso,
       total_minutes: minutes,
@@ -125,7 +125,7 @@ function formatDuration(ms: number) {
 
 async function massCloseAt(endIso: string) {
   const { data: sessions } = await supabase
-    ..from('sesiones')
+    .from('sesiones')
     .select("id,start_time,user_name")
     .is("end_time", null);
   if (!sessions || sessions.length === 0) return 0;
@@ -139,7 +139,7 @@ async function massCloseAt(endIso: string) {
     );
     const minutes = Math.round(raw * ev.multiplier);
     const { error } = await supabase
-      ..from('sesiones')
+      .from('sesiones')
       .update({
         end_time: endIso,
         total_minutes: minutes,
@@ -245,7 +245,7 @@ function Index() {
 
   const loadLeaders = useCallback(async () => {
     const { data } = await supabase
-      ..from('sesiones')
+      .from('sesiones')
       .select("user_name,total_minutes,end_time");
     if (!data) return;
     const minutesMap = new Map<string, number>();
@@ -268,7 +268,7 @@ function Index() {
   const checkActiveSession = useCallback(async (name: string) => {
     if (!name) return;
     const { data: openRows } = await supabase
-      ..from('sesiones')
+      .from('sesiones')
       .select("*")
       .eq("user_name", name)
       .is("end_time", null)
@@ -295,7 +295,7 @@ function Index() {
         await closeSessionAt(row.id, row.start_time, row.last_seen);
       } else {
         await supabase
-          ..from('sesiones')
+          .from('sesiones')
           .update({ end_time: row.start_time, total_minutes: 0, last_seen: row.start_time })
           .eq("id", row.id)
           .is("end_time", null);
@@ -380,7 +380,7 @@ function Index() {
 
     // 1) Sanitización: cerrar TODAS las sesiones huérfanas abiertas de este usuario (0 min)
     const { data: orphans } = await supabase
-      ..from('sesiones')
+      .from('sesiones')
       .select("id,start_time,last_seen")
       .eq("user_name", name)
       .is("end_time", null);
@@ -388,7 +388,7 @@ function Index() {
       await Promise.all(
         orphans.map((o) =>
           supabase
-            ..from('sesiones')
+            .from('sesiones')
             .update({ end_time: o.start_time, total_minutes: 0, last_seen: o.start_time })
             .eq("id", o.id)
             .is("end_time", null)
@@ -399,7 +399,7 @@ function Index() {
     // 2) Nueva sesión con start_time = ahora (UTC) — contador arranca en 00:00:00
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
-      ..from('sesiones')
+      .from('sesiones')
       .insert({ user_name: name, start_time: nowIso, last_seen: nowIso })
       .select()
       .single();
@@ -499,7 +499,7 @@ function Index() {
       }
 
       const nowIso = new Date().toISOString();
-      await supabase..from('sesiones').update({ last_seen: nowIso }).eq("id", session.id);
+      await supabase.from('sesiones').update({ last_seen: nowIso }).eq("id", session.id);
       if (cancelled) return;
       setIp(currentIp);
       setLastVerified(Date.now());
