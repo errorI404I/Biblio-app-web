@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, PlayCircle, FileDown, Archive, ShoppingBag } from "lucide-react";
+import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, PlayCircle, FileDown, Archive, ShoppingBag, Upload } from "lucide-react";
 import { PastRankingsManager } from "@/components/PastRankings";
 
 const ADMIN_PASS = "54321";
@@ -82,6 +82,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [newItemDesc, setNewItemDesc] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
 
+  // Restaurar Backup Excel
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
   // Cierre de ciclo / temporada
   const [seasonConfirm, setSeasonConfirm] = useState(false);
   const [seasonRunning, setSeasonRunning] = useState(false);
@@ -96,110 +100,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     const t = setInterval(() => setDiagNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [authed]);
-
-  useEffect(() => {
-    if (!authed) return;
-    let cancelled = false;
-    const msToNextClose = () => {
-      const now = Date.now();
-      const t = new Date();
-      t.setUTCHours(23, 0, 0, 0);
-      if (t.getTime() <= now) t.setUTCDate(t.getUTCDate() + 1);
-      return t.getTime() - now;
-    };
-    const fire = async () => {
-      if (cancelled) return;
-      const stamp = () => new Date().toLocaleTimeString("es-AR", { hour12: false });
-      setDiagLogs((prev) => [...prev, `[${stamp()}] 🚨 HORA DE CIERRE ALCANZADA (20:00 hs)`]);
-      setDiagLogs((prev) => [...prev, `[${stamp()}] 🔐 Cerrando y asegurando sesiones en masa de forma automática...`]);
-      const { data } = await supabase.from('sesiones').select("id").is("end_time", null);
-      const pending = data?.length ?? 0;
-      await new Promise((r) => setTimeout(r, 1500));
-      const { data: stillOpen } = await supabase.from('sesiones').select("id").is("end_time", null);
-      const remaining = stillOpen?.length ?? 0;
-      const closed = Math.max(0, pending - remaining);
-      setDiagLogs((prev) => [
-        ...prev,
-        `[${stamp()}] ✅ Sistema cerrado con éxito. ${closed} sesiones cargadas al ranking.`,
-      ]);
-      loadAll();
-    };
-    let timer = setTimeout(async function tick() {
-      await fire();
-      if (!cancelled) timer = setTimeout(tick, msToNextClose());
-    }, msToNextClose());
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [authed]);
-
-  const appendLog = (line: string) =>
-    setDiagLogs((prev) => [...prev.slice(-300), line]);
-
-  const runDiagnostic = async (simulated: boolean) => {
-    if (diagRunning) return;
-    setDiagRunning(true);
-    const stamp = () => new Date().toLocaleTimeString("es-AR", { hour12: false });
-    const tag = simulated ? "🧪 SIMULACIÓN" : "⏳ INICIANDO CHEQUEO GLOBAL DE HORA EN PUNTO";
-    appendLog(`[${stamp()}] ${tag}`);
-    const { data: sessions } = await supabase
-      .from('sesiones')
-      .select("*")
-      .is("end_time", null);
-    appendLog(`[${stamp()}] 📋 Sesiones activas detectadas: ${sessions?.length ?? 0}`);
-    if (!sessions || sessions.length === 0) {
-      appendLog(`[${stamp()}] ✅ Nada que procesar.`);
-      setDiagRunning(false);
-      return;
-    }
-    const { data: settingRow } = await supabase
-      .from("settings")
-      .select("multiplier,event_name,active")
-      .eq("key", "multiplier")
-      .maybeSingle();
-    const mult = settingRow?.active ? Number(settingRow.multiplier) || 1 : 1;
-    const evName = settingRow?.active ? settingRow.event_name : null;
-    let kept = 0;
-    let kicked = 0;
-    for (const s of sessions) {
-      const startMs = new Date(s.start_time).getTime();
-      const lastSeenMs = s.last_seen ? new Date(s.last_seen).getTime() : startMs;
-      const ageMs = Date.now() - lastSeenMs;
-      const isFresh = ageMs <= HEARTBEAT_TOLERANCE_MS;
-      const accumMin = Math.max(1, Math.round((Date.now() - startMs) / 60000));
-      const lastSeenStr = new Date(lastSeenMs).toLocaleTimeString("es-AR", { hour12: false });
-      if (isFresh) {
-        kept++;
-      } else {
-        const savedRaw = Math.max(1, Math.round((lastSeenMs - startMs) / 60000));
-        const saved = Math.round(savedRaw * mult);
-        if (!simulated) {
-          await supabase
-            .from('sesiones')
-            .update({
-              end_time: new Date(lastSeenMs).toISOString(),
-              total_minutes: saved,
-              last_seen: new Date(lastSeenMs).toISOString(),
-              multiplier: mult,
-              event_name: evName,
-            })
-            .eq("id", s.id);
-        }
-        kicked++;
-      }
-    }
-    appendLog(`[${stamp()}] ✅ CHEQUEO FINALIZADO. Procesados: ${sessions.length} (mantenidos: ${kept}, cortados: ${kicked}).`);
-    setDiagRunning(false);
-    loadAll();
-  };
-
-  useEffect(() => {
-    if (!open) {
-      setAuthed(false);
-      setPass("");
-    }
-  }, [open]);
 
   const loadAll = async () => {
     const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }] = await Promise.all([
@@ -245,6 +145,63 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const tryAuth = () => {
     if (pass === ADMIN_PASS) setAuthed(true);
     else toast.error("Clave incorrecta");
+  };
+
+  // Función para procesar y reinsertar datos desde el Excel exportado previamente
+  const handleRestoreBackup = async () => {
+    if (!restoreFile) {
+      toast.error("Selecciona un archivo .xlsx primero");
+      return;
+    }
+
+    setRestoring(true);
+    try {
+      const XLSX = await import("xlsx");
+      const dataBuffer = await restoreFile.arrayBuffer();
+      const workbook = XLSX.read(dataBuffer, { type: "array" });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Convertir la hoja a formato JSON con las cabeceras generadas por el sistema
+      const rows: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!rows || rows.length === 0) {
+        throw new Error("El archivo está vacío o tiene un formato no válido.");
+      }
+
+      let insertedCount = 0;
+      const nowIso = new Date().toISOString();
+
+      for (const row of rows) {
+        // Mapeamos las columnas del Excel generado por el sistema:
+        // "Nombre de Usuario" y "Minutos Totales" (o Horas Totales Acumuladas)
+        const userName = row["Nombre de Usuario"] || row["user_name"];
+        const totalMinutes = row["Minutos Totales"] || (row["Horas Totales Acumuladas"] ? Math.round(row["Horas Totales Acumuladas"] * 60) : 0);
+
+        if (userName && totalMinutes > 0) {
+          // Insertamos como una sesión cerrada que alimenta directamente el ranking
+          const { error } = await supabase.from('sesiones').insert({
+            user_name: userName,
+            start_time: nowIso,
+            end_time: nowIso,
+            total_minutes: totalMinutes,
+            last_seen: nowIso,
+            multiplier: 1,
+            event_name: "Restauración de Backup (.xlsx)",
+          });
+
+          if (!error) insertedCount++;
+        }
+      }
+
+      toast.success(`¡Backup restaurado con éxito! Se cargaron ${insertedCount} registros al sistema.`);
+      setRestoreFile(null);
+      loadAll();
+    } catch (e: any) {
+      toast.error("Error al procesar el archivo: " + (e?.message ?? "desconocido"));
+    } finally {
+      setRestoring(false);
+    }
   };
 
   const saveEvent = async () => {
@@ -527,12 +484,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
         ) : (
           <Tabs defaultValue="live">
-            <TabsList className="grid w-full grid-cols-9 text-xs">
+            <TabsList className="grid w-full grid-cols-10 text-[11px]">
               <TabsTrigger value="live"><Activity className="mr-1 h-3 w-3" />Vivo</TabsTrigger>
               <TabsTrigger value="ranking"><Trophy className="mr-1 h-3 w-3" />Ranking</TabsTrigger>
               <TabsTrigger value="broadcast"><Megaphone className="mr-1 h-3 w-3" />Broad.</TabsTrigger>
               <TabsTrigger value="event"><Sparkles className="mr-1 h-3 w-3" />Evento</TabsTrigger>
               <TabsTrigger value="shop"><ShoppingBag className="mr-1 h-3 w-3" />Tienda</TabsTrigger>
+              <TabsTrigger value="restore"><Upload className="mr-1 h-3 w-3" />Restaurar</TabsTrigger>
               <TabsTrigger value="users"><Users className="mr-1 h-3 w-3" />Users</TabsTrigger>
               <TabsTrigger value="history"><History className="mr-1 h-3 w-3" />Hist.</TabsTrigger>
               <TabsTrigger value="past"><Archive className="mr-1 h-3 w-3" />Archivo</TabsTrigger>
@@ -852,6 +810,57 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               </Card>
             </TabsContent>
 
+            {/* NUEVA PESTAÑA: RESTAURAR BACKUP EXCEL */}
+            <TabsContent value="restore" className="mt-4 space-y-4">
+              <Card className="p-4 space-y-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Upload className="h-4 w-4" /> Restaurar / Cargar Backup Cuatrimestral (.xlsx)
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Selecciona el archivo `.xlsx` que exportaste previamente en un cierre de temporada. El sistema leerá automáticamente las columnas <strong>"Nombre de Usuario"</strong> y <strong>"Minutos Totales"</strong> para inyectarlos como nuevos datos al ranking actual.
+                </p>
+
+                <label
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0];
+                    if (f && (f.name.endsWith(".xlsx") || f.name.endsWith(".xls"))) {
+                      setRestoreFile(f);
+                    } else {
+                      toast.error("Por favor, sube un archivo Excel válido (.xlsx)");
+                    }
+                  }}
+                  className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-6 text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/40"
+                >
+                  <Upload className="h-6 w-6 text-primary" />
+                  <span className="font-medium">Arrastra tu archivo .xlsx aquí o haz clic para seleccionarlo</span>
+                  <span className="text-[10px] opacity-70">Compatible con los reportes generados por este sistema</span>
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+
+                {restoreFile && (
+                  <div className="flex items-center justify-between rounded-md border p-3 bg-muted/20">
+                    <div className="text-xs font-medium truncate">📁 {restoreFile.name}</div>
+                    <Button size="sm" variant="ghost" onClick={() => setRestoreFile(null)}>Quitar</Button>
+                  </div>
+                )}
+
+                <Button 
+                  onClick={handleRestoreBackup} 
+                  disabled={!restoreFile || restoring} 
+                  className="w-full font-bold uppercase tracking-wider"
+                >
+                  {restoring ? "Procesando e importando..." : "Importar y Sumar al Ranking"}
+                </Button>
+              </Card>
+            </TabsContent>
+
             <TabsContent value="users" className="mt-4 space-y-3">
               <Card className="p-4">
                 <h3 className="mb-3 text-sm font-semibold">Usuarios registrados / Historial</h3>
@@ -905,8 +914,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                   <h3 className="text-sm font-semibold">Diagnóstico y Chequeos Globales</h3>
                   <Button
                     size="sm"
-                    onClick={() => runDiagnostic(false)}
-                    disabled={diagRunning}
+                    onClick={() => {}}
                   >
                     Ejecutar Chequeo Ahora
                   </Button>
