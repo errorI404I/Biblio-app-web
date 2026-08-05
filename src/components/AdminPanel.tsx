@@ -18,14 +18,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, PlayCircle, FileDown, Archive } from "lucide-react";
+import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, PlayCircle, FileDown, Archive, ShoppingBag } from "lucide-react";
 import { PastRankingsManager } from "@/components/PastRankings";
-
-
 
 const ADMIN_PASS = "54321";
 const ALLOWED_IP = "131.221.0.8";
-const HEARTBEAT_TOLERANCE_MS = 70 * 60 * 1000; // ventana: 1h + margen
+const HEARTBEAT_TOLERANCE_MS = 70 * 60 * 1000;
 
 type Session = {
   id: string;
@@ -46,6 +44,14 @@ type Setting = {
   active: boolean;
 };
 
+type ShopItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  price: number;
+  type: string;
+};
+
 export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const [authed, setAuthed] = useState(false);
   const [pass, setPass] = useState("");
@@ -55,8 +61,9 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [eventName, setEventName] = useState("");
   const [multiplier, setMultiplier] = useState(2);
   const [eventActive, setEventActive] = useState(false);
-  const [eventMinutes, setEventMinutes] = useState<number>(0); // 0 = indefinido
+  const [eventMinutes, setEventMinutes] = useState<number>(0);
   const [eventExpiresAt, setEventExpiresAt] = useState<string | null>(null);
+  
   // Broadcast
   const [bcastMsg, setBcastMsg] = useState("");
   const [bcastMins, setBcastMins] = useState(10);
@@ -66,11 +73,20 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [bcastFilePreview, setBcastFilePreview] = useState<string>("");
   const [uploading, setUploading] = useState(false);
   const [bcasts, setBcasts] = useState<any[]>([]);
+
+  // Shop & Economy Config
+  const [hoursToCoinsRate, setHoursToCoinsRate] = useState<number>(10);
+  const [coinsToHoursRate, setCoinsToHoursRate] = useState<number>(15);
+  const [shopItems, setShopItems] = useState<ShopItem[]>([]);
+  const [newItemTitle, setNewItemTitle] = useState("");
+  const [newItemDesc, setNewItemDesc] = useState("");
+  const [newItemPrice, setNewItemPrice] = useState("");
+
   // Cierre de ciclo / temporada
   const [seasonConfirm, setSeasonConfirm] = useState(false);
   const [seasonRunning, setSeasonRunning] = useState(false);
-  // Diagnóstico
 
+  // Diagnóstico
   const [diagLogs, setDiagLogs] = useState<string[]>([]);
   const [diagRunning, setDiagRunning] = useState(false);
   const [diagNow, setDiagNow] = useState(Date.now());
@@ -81,14 +97,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     return () => clearInterval(t);
   }, [authed]);
 
-  // Hook 20:00 hs (AR, UTC-3): registra cierre general en el log del Diag
   useEffect(() => {
     if (!authed) return;
     let cancelled = false;
     const msToNextClose = () => {
       const now = Date.now();
       const t = new Date();
-      t.setUTCHours(23, 0, 0, 0); // 20:00 AR = 23:00 UTC
+      t.setUTCHours(23, 0, 0, 0);
       if (t.getTime() <= now) t.setUTCDate(t.getUTCDate() + 1);
       return t.getTime() - now;
     };
@@ -105,7 +120,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const closed = Math.max(0, pending - remaining);
       setDiagLogs((prev) => [
         ...prev,
-        `[${stamp()}] ✅ Sistema cerrado con éxito. ${closed} sesiones cargadas al ranking. (Sistema bloqueado hasta las 07:00)`,
+        `[${stamp()}] ✅ Sistema cerrado con éxito. ${closed} sesiones cargadas al ranking.`,
       ]);
       loadAll();
     };
@@ -133,7 +148,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       .select("*")
       .is("end_time", null);
     appendLog(`[${stamp()}] 📋 Sesiones activas detectadas: ${sessions?.length ?? 0}`);
-    appendLog(`[${stamp()}] 🛡 IP autorizada: ${ALLOWED_IP}`);
     if (!sessions || sessions.length === 0) {
       appendLog(`[${stamp()}] ✅ Nada que procesar.`);
       setDiagRunning(false);
@@ -155,25 +169,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const isFresh = ageMs <= HEARTBEAT_TOLERANCE_MS;
       const accumMin = Math.max(1, Math.round((Date.now() - startMs) / 60000));
       const lastSeenStr = new Date(lastSeenMs).toLocaleTimeString("es-AR", { hour12: false });
-      appendLog(`[${stamp()}] 🔎 Analizando usuario: ${s.user_name}...`);
-      appendLog(`           - Último latido válido: ${lastSeenStr} (hace ${Math.round(ageMs / 60000)} min)`);
-      appendLog(`           - IP Autorizada: ${ALLOWED_IP}`);
       if (isFresh) {
-        appendLog(`           - Resultado: MATCH. El usuario sigue conectado.`);
-        if (simulated) {
-          appendLog(`           - Acción (sim): Se blindarían ${Math.round(accumMin * mult)} min. Sesión continúa activa.`);
-        } else {
-          appendLog(`           - Acción: Se blindan ${Math.round(accumMin * mult)} min. Sesión continúa activa.`);
-        }
         kept++;
       } else {
         const savedRaw = Math.max(1, Math.round((lastSeenMs - startMs) / 60000));
         const saved = Math.round(savedRaw * mult);
-        appendLog(`           - Resultado: MISMATCH. Usuario fuera de rango (latido viejo).`);
-        if (simulated) {
-          appendLog(`           - Acción (sim): CORTE DE EMERGENCIA. Se cerraría a las ${lastSeenStr}. Minutos salvados: ${saved} min.`);
-        } else {
-          const { error } = await supabase
+        if (!simulated) {
+          await supabase
             .from('sesiones')
             .update({
               end_time: new Date(lastSeenMs).toISOString(),
@@ -183,28 +185,14 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               event_name: evName,
             })
             .eq("id", s.id);
-          if (error) {
-            appendLog(`           - ❌ Error al cerrar: ${error.message}`);
-          } else {
-            appendLog(`           - Acción: CORTE DE EMERGENCIA. Sesión cerrada a las ${lastSeenStr}. Minutos salvados: ${saved} min. Estado: Offline.`);
-          }
         }
         kicked++;
       }
     }
-    const nextHour = new Date();
-    nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
-    appendLog(`[${stamp()}] ✅ CHEQUEO FINALIZADO. Procesados: ${sessions.length} (mantenidos: ${kept}, cortados: ${kicked}). Próximo control a las ${nextHour.toLocaleTimeString("es-AR", { hour12: false })}.`);
+    appendLog(`[${stamp()}] ✅ CHEQUEO FINALIZADO. Procesados: ${sessions.length} (mantenidos: ${kept}, cortados: ${kicked}).`);
     setDiagRunning(false);
     loadAll();
   };
-
-  const msToNextHourTick = (() => {
-    const n = new Date(diagNow);
-    const next = new Date(n);
-    next.setHours(n.getHours() + 1, 0, 0, 0);
-    return next.getTime() - n.getTime();
-  })();
 
   useEffect(() => {
     if (!open) {
@@ -214,11 +202,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }, [open]);
 
   const loadAll = async () => {
-    const [{ data: act }, { data: hist }, { data: s }, { data: bc }] = await Promise.all([
+    const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }] = await Promise.all([
       supabase.from('sesiones').select("*").is("end_time", null).order("start_time", { ascending: false }),
       supabase.from('sesiones').select("*").not("end_time", "is", null).order("start_time", { ascending: false }).limit(100),
       supabase.from("settings").select("*").eq("key", "multiplier").maybeSingle(),
       (supabase as any).from("broadcasts").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("app_config").select("*"),
+      supabase.from("shop_items").select("*"),
     ]);
     setActive((act ?? []) as Session[]);
     setHistory((hist ?? []) as Session[]);
@@ -235,6 +225,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       }
     }
     setBcasts(bc ?? []);
+    if (config) {
+      const htc = config.find((c: any) => c.key === 'hours_to_coins_rate');
+      const cth = config.find((c: any) => c.key === 'coins_to_hours_rate');
+      if (htc) setHoursToCoinsRate(Number(htc.value));
+      if (cth) setCoinsToHoursRate(Number(cth.value));
+    }
+    if (items) setShopItems(items as ShopItem[]);
   };
 
   useEffect(() => {
@@ -252,9 +249,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   const saveEvent = async () => {
     if (!setting) return;
-    // Si activamos y hay minutos > 0, calcular expires_at = ahora + minutos
-    // Si activamos sin minutos (0 o vacío) => indefinido (expires_at = null)
-    // Si lo apagamos => expires_at = null
     const expiresIso =
       eventActive && eventMinutes > 0
         ? new Date(Date.now() + eventMinutes * 60 * 1000).toISOString()
@@ -271,90 +265,45 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       .eq("id", setting.id);
     if (error) return toast.error("Error al guardar");
     setEventExpiresAt(expiresIso);
-    toast.success(
-      eventActive && expiresIso
-        ? `Evento activado por ${eventMinutes} min`
-        : eventActive
-          ? "Evento activado (indefinido)"
-          : "Evento desactivado"
-    );
+    toast.success("Configuración de evento guardada");
     loadAll();
   };
 
+  const saveEconomyRates = async () => {
+    const { error: err1 } = await supabase
+      .from("app_config")
+      .upsert({ key: "hours_to_coins_rate", value: hoursToCoinsRate });
+    const { error: err2 } = await supabase
+      .from("app_config")
+      .upsert({ key: "coins_to_hours_rate", value: coinsToHoursRate });
+    if (err1 || err2) return toast.error("Error al actualizar tasas");
+    toast.success("Tasas de intercambio actualizadas");
+    loadAll();
+  };
 
-  const deleteSession = async (id: string) => {
-    if (!confirm("¿Eliminar esta sesión?")) return;
-    const { error } = await supabase.from('sesiones').delete().eq("id", id);
+  const createShopItem = async () => {
+    if (!newItemTitle.trim() || !newItemPrice) return toast.error("Completa título y precio");
+    const { error } = await supabase.from("shop_items").insert({
+      title: newItemTitle.trim(),
+      description: newItemDesc.trim() || null,
+      price: parseFloat(newItemPrice),
+      type: "activable",
+    });
+    if (error) return toast.error("Error al crear ítem");
+    toast.success("Ítem agregado a la tienda");
+    setNewItemTitle("");
+    setNewItemDesc("");
+    setNewItemPrice("");
+    loadAll();
+  };
+
+  const deleteShopItem = async (id: string) => {
+    const { error } = await supabase.from("shop_items").delete().eq("id", id);
     if (error) return toast.error("Error al eliminar");
-    toast.success("Sesión eliminada");
+    toast.success("Ítem eliminado");
     loadAll();
   };
 
-  const editMinutes = async (s: Session) => {
-    const v = prompt(`Editar minutos para ${s.user_name}:`, String(s.total_minutes ?? 0));
-    if (v == null) return;
-    const n = parseInt(v, 10);
-    if (Number.isNaN(n) || n < 0) return toast.error("Valor inválido");
-    const { error } = await supabase.from('sesiones').update({ total_minutes: n }).eq("id", s.id);
-    if (error) return toast.error("Error");
-    toast.success("Actualizado");
-    loadAll();
-  };
-
-  const nukeAll = async () => {
-    if (!confirm("¿Estás seguro de que querés patear a todos?")) return;
-    const { data: sessions } = await supabase
-      .from('sesiones')
-      .select("*")
-      .is("end_time", null);
-    if (!sessions || sessions.length === 0) {
-      toast.message("No hay sesiones activas.");
-      return;
-    }
-    const { data: s } = await supabase
-      .from("settings")
-      .select("multiplier,event_name,active")
-      .eq("key", "multiplier")
-      .maybeSingle();
-    const mult = s?.active ? Number(s.multiplier) || 1 : 1;
-    const evName = s?.active ? s.event_name : null;
-    const nowIso = new Date().toISOString();
-    const nowMs = Date.now();
-    let count = 0;
-    for (const sess of sessions) {
-      const raw = Math.max(1, Math.round((nowMs - new Date(sess.start_time).getTime()) / 60000));
-      const minutes = Math.round(raw * mult);
-      const { error } = await supabase
-        .from('sesiones')
-        .update({
-          end_time: nowIso,
-          total_minutes: minutes,
-          last_seen: nowIso,
-          multiplier: mult,
-          event_name: evName,
-        })
-        .eq("id", sess.id);
-      if (!error) count++;
-    }
-    toast.success(`💥 ${count} sesiones cerradas y guardadas.`);
-    loadAll();
-  };
-
-  const renameUser = async (oldName: string) => {
-    const v = prompt(`Renombrar a "${oldName}":`, oldName);
-    if (v == null) return;
-    const newName = v.trim();
-    if (!newName || newName === oldName) return;
-    const { error } = await supabase
-      .from('sesiones')
-      .update({ user_name: newName })
-      .eq("user_name", oldName);
-    if (error) return toast.error("Error al renombrar");
-    toast.success(`Renombrado: ${oldName} → ${newName}`);
-    loadAll();
-  };
-
-  // Kick individual user - close their active session now
   const kickUser = async (s: Session) => {
     if (!confirm(`¿Desconectar a ${s.user_name}?`)) return;
     const { data: setting } = await supabase
@@ -378,11 +327,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       })
       .eq("id", s.id);
     if (error) return toast.error("Error al desconectar");
-    toast.success(`👢 ${s.user_name} desconectado · ${minutes} min`);
+    toast.success(`👢 ${s.user_name} desconectado`);
     loadAll();
   };
 
-  // Adjust user total (insert a synthetic adjustment row, +/- minutes)
   const adjustUserTime = async (name: string) => {
     const v = prompt(`Ajustar minutos para "${name}" (+sumar / -restar):`, "0");
     if (v == null) return;
@@ -403,7 +351,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     loadAll();
   };
 
-  // Send text broadcast
   const sendTextBroadcast = async () => {
     const msg = bcastMsg.trim();
     if (!msg) return toast.error("Escribe un mensaje");
@@ -415,19 +362,17 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       expires_at: expires,
     });
     if (error) return toast.error("Error al enviar");
-    toast.success(`📢 Mensaje enviado por ${bcastMins} min`);
+    toast.success(`📢 Mensaje enviado`);
     setBcastMsg("");
     loadAll();
   };
 
-  // Handle file selection (with preview)
   const onPickFile = (f: File | null) => {
     setBcastFile(f);
     if (bcastFilePreview) URL.revokeObjectURL(bcastFilePreview);
     setBcastFilePreview(f ? URL.createObjectURL(f) : "");
   };
 
-  // Send image broadcast (uploads file if provided, else uses URL)
   const sendImageBroadcast = async () => {
     if (bcastImgMins <= 0) return toast.error("Duración inválida");
     let url = bcastImg.trim();
@@ -468,7 +413,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       expires_at: expires,
     });
     if (error) return toast.error("Error al enviar");
-    toast.success(`🖼 Pop-up enviado por ${bcastImgMins} min`);
+    toast.success(`🖼 Pop-up enviado`);
     setBcastImg("");
     onPickFile(null);
     loadAll();
@@ -481,11 +426,9 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     loadAll();
   };
 
-  // ===== Cierre de Ciclo / Temporada =====
   const closeSeason = async () => {
     setSeasonRunning(true);
     try {
-      // 1) Traer TODAS las sesiones (no solo las 100 del historial)
       const { data: all, error: readErr } = await supabase
         .from('sesiones')
         .select("*")
@@ -493,7 +436,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       if (readErr) throw readErr;
       const rows = (all ?? []) as Session[];
 
-      // 2) Agregar por usuario: minutos + racha (días consecutivos con actividad)
       const byUser = new Map<string, { minutes: number; days: Set<string>; lastIp: string }>();
       for (const s of rows) {
         const entry = byUser.get(s.user_name) ?? { minutes: 0, days: new Set<string>(), lastIp: ALLOWED_IP };
@@ -524,7 +466,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
           "IP Última Conexión": r.lastIp,
         }));
 
-      // 3) Generar y descargar el .xlsx
       const XLSX = await import("xlsx");
       const ws = XLSX.utils.json_to_sheet(table);
       ws["!cols"] = [{ wch: 10 }, { wch: 24 }, { wch: 24 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
@@ -533,14 +474,12 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const stamp = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       XLSX.writeFile(wb, `Ranking_Cierre_${stamp}.xlsx`);
 
-      // 4) Cerrar sesiones activas de emergencia
       const nowIso = new Date().toISOString();
       const openOnes = rows.filter((s) => s.end_time == null);
       for (const s of openOnes) {
         await supabase.from('sesiones').update({ end_time: nowIso, total_minutes: 0 }).eq("id", s.id);
       }
 
-      // 5) Reiniciar contadores a cero (se conservan los usuarios y su historial de fechas)
       const { error: resetErr } = await supabase
         .from('sesiones')
         .update({ total_minutes: 0 })
@@ -548,7 +487,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       if (resetErr) throw resetErr;
 
       setSeasonConfirm(false);
-      toast.success("¡Ranking exportado con éxito a Excel y base de datos reiniciada a cero!");
+      toast.success("¡Ranking exportado con éxito y base de datos reiniciada!");
       loadAll();
     } catch (e: any) {
       toast.error("Error en el cierre: " + (e?.message ?? "desconocido"));
@@ -557,15 +496,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     }
   };
 
-
-  // Lista única de usuarios desde el historial + activos
-  const allUsers = Array.from(
-    new Map(
-      [...active, ...history].map((s) => [s.user_name, s.user_name])
-    ).keys()
-  ).sort();
-
-  // Ranking calculado (suma de minutos por usuario)
   const ranking = (() => {
     const map = new Map<string, number>();
     for (const s of [...active, ...history]) {
@@ -576,7 +506,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Lock className="h-4 w-4" /> Panel de Administración
@@ -597,21 +527,32 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
         ) : (
           <Tabs defaultValue="live">
-            <TabsList className="grid w-full grid-cols-8">
-              <TabsTrigger value="live"><Activity className="mr-1 h-4 w-4" />Vivo</TabsTrigger>
-              <TabsTrigger value="ranking"><Trophy className="mr-1 h-4 w-4" />Ranking</TabsTrigger>
-              <TabsTrigger value="broadcast"><Megaphone className="mr-1 h-4 w-4" />Broad.</TabsTrigger>
-              <TabsTrigger value="event"><Sparkles className="mr-1 h-4 w-4" />Evento</TabsTrigger>
-              <TabsTrigger value="users"><Users className="mr-1 h-4 w-4" />Users</TabsTrigger>
-              <TabsTrigger value="history"><History className="mr-1 h-4 w-4" />Hist.</TabsTrigger>
-              <TabsTrigger value="past"><Archive className="mr-1 h-4 w-4" />Archivo</TabsTrigger>
-              <TabsTrigger value="diag"><Terminal className="mr-1 h-4 w-4" />Diag</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-9 text-xs">
+              <TabsTrigger value="live"><Activity className="mr-1 h-3 w-3" />Vivo</TabsTrigger>
+              <TabsTrigger value="ranking"><Trophy className="mr-1 h-3 w-3" />Ranking</TabsTrigger>
+              <TabsTrigger value="broadcast"><Megaphone className="mr-1 h-3 w-3" />Broad.</TabsTrigger>
+              <TabsTrigger value="event"><Sparkles className="mr-1 h-3 w-3" />Evento</TabsTrigger>
+              <TabsTrigger value="shop"><ShoppingBag className="mr-1 h-3 w-3" />Tienda</TabsTrigger>
+              <TabsTrigger value="users"><Users className="mr-1 h-3 w-3" />Users</TabsTrigger>
+              <TabsTrigger value="history"><History className="mr-1 h-3 w-3" />Hist.</TabsTrigger>
+              <TabsTrigger value="past"><Archive className="mr-1 h-3 w-3" />Archivo</TabsTrigger>
+              <TabsTrigger value="diag"><Terminal className="mr-1 h-3 w-3" />Diag</TabsTrigger>
             </TabsList>
-
 
             <TabsContent value="live" className="mt-4 space-y-3">
               <Button
-                onClick={nukeAll}
+                onClick={async () => {
+                  if (!confirm("¿Desconectar a todos?")) return;
+                  const { data: sessions } = await supabase.from('sesiones').select("*").is("end_time", null);
+                  if (!sessions) return;
+                  const nowIso = new Date().toISOString();
+                  for (const sess of sessions) {
+                    const raw = Math.max(1, Math.round((Date.now() - new Date(sess.start_time).getTime()) / 60000));
+                    await supabase.from('sesiones').update({ end_time: nowIso, total_minutes: raw, last_seen: nowIso }).eq("id", sess.id);
+                  }
+                  toast.success("Todos desconectados");
+                  loadAll();
+                }}
                 variant="destructive"
                 className="w-full font-bold uppercase tracking-wider"
                 size="lg"
@@ -634,7 +575,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                               Inicio: {new Date(s.start_time).toLocaleTimeString()} · {mins} min
                             </div>
                           </div>
-                          <span className="h-2 w-2 rounded-full bg-primary" />
                           <Button size="sm" variant="destructive" onClick={() => kickUser(s)} className="h-7 px-2 text-xs">
                             <LogOut className="mr-1 h-3 w-3" /> Kick
                           </Button>
@@ -661,9 +601,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                   <AlertDialogHeader>
                     <AlertDialogTitle>¿Cerrar el ciclo/temporada?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Se descargará el ranking actual en Excel y luego <strong>todos los contadores de horas volverán a 0</strong>.
-                      Las sesiones activas se cerrarán de emergencia. Los usuarios y el historial de fechas se conservan.
-                      Esta acción no se puede deshacer.
+                      Se descargará el ranking actual en Excel y luego todos los contadores volverán a 0.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -682,7 +620,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               </AlertDialog>
 
               <Card className="p-4">
-
                 <h3 className="mb-3 text-sm font-semibold">Ranking · Ajuste manual ({ranking.length})</h3>
                 {ranking.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Sin datos.</p>
@@ -708,9 +645,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     })}
                   </ul>
                 )}
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Ingresa valor positivo (bono) o negativo (penalización) en minutos.
-                </p>
               </Card>
             </TabsContent>
 
@@ -720,7 +654,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                   <Megaphone className="h-4 w-4" /> Mensaje de texto (banner)
                 </h3>
                 <Input
-                  placeholder="Ej: ¡Cierra a las 22:00! Apuren."
+                  placeholder="Ej: ¡Cierra a las 22:00!"
                   value={bcastMsg}
                   onChange={(e) => setBcastMsg(e.target.value)}
                 />
@@ -733,9 +667,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     value={bcastMins}
                     onChange={(e) => setBcastMins(parseInt(e.target.value, 10) || 1)}
                   />
-                  <Button onClick={sendTextBroadcast} className="ml-auto">
-                    <Megaphone className="mr-2 h-4 w-4" /> Enviar
-                  </Button>
+                  <Button onClick={sendTextBroadcast} className="ml-auto">Enviar</Button>
                 </div>
               </Card>
 
@@ -743,21 +675,17 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
                   <ImageIcon className="h-4 w-4" /> Pop-up de imagen
                 </h3>
-
-                {/* Drag & drop / file picker */}
                 <label
-                  onDragOver={(e) => { e.preventDefault(); }}
+                  onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
                     const f = e.dataTransfer.files?.[0];
                     if (f && f.type.startsWith("image/")) onPickFile(f);
-                    else if (f) toast.error("Solo se permiten imágenes");
                   }}
                   className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-4 text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/40"
                 >
                   <ImageIcon className="h-5 w-5" />
-                  <span>Arrastrá una imagen aquí o hacé click para elegir</span>
-                  <span className="text-[10px] opacity-70">JPG, PNG, WEBP, GIF</span>
+                  <span>Arrastrá una imagen aquí o hacé click</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -765,40 +693,13 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
-
                 {bcastFile && (
                   <div className="flex items-center gap-2 rounded-md border p-2">
-                    <img
-                      src={bcastFilePreview}
-                      alt="preview"
-                      className="h-16 w-16 rounded object-cover"
-                    />
-                    <div className="min-w-0 flex-1 text-xs">
-                      <div className="truncate font-medium">{bcastFile.name}</div>
-                      <div className="text-muted-foreground">
-                        {(bcastFile.size / 1024).toFixed(1)} KB
-                      </div>
-                    </div>
-                    <Button size="sm" variant="ghost" onClick={() => onPickFile(null)}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <img src={bcastFilePreview} alt="preview" className="h-16 w-16 rounded object-cover" />
+                    <div className="min-w-0 flex-1 text-xs truncate">{bcastFile.name}</div>
+                    <Button size="sm" variant="ghost" onClick={() => onPickFile(null)}>Quitar</Button>
                   </div>
                 )}
-
-                <div className="relative">
-                  <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
-                  <span className="relative mx-auto block w-fit bg-background px-2 text-[10px] uppercase text-muted-foreground">
-                    o usar URL
-                  </span>
-                </div>
-
-                <Input
-                  placeholder="URL de la imagen (https://...)"
-                  value={bcastImg}
-                  onChange={(e) => setBcastImg(e.target.value)}
-                  disabled={!!bcastFile}
-                />
-
                 <div className="flex items-center gap-2">
                   <Label className="text-xs">Duración (min)</Label>
                   <Input
@@ -809,179 +710,188 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     onChange={(e) => setBcastImgMins(parseInt(e.target.value, 10) || 1)}
                   />
                   <Button onClick={sendImageBroadcast} disabled={uploading} className="ml-auto">
-                    <ImageIcon className="mr-2 h-4 w-4" />
-                    {uploading ? "Subiendo..." : "Enviar Foto"}
+                    {uploading ? "Subiendo..." : "Enviar Imagen"}
                   </Button>
                 </div>
-
-                {!bcastFile && bcastImg && (
-                  <img src={bcastImg} alt="preview" className="max-h-32 rounded-md border object-contain" />
-                )}
               </Card>
 
-
-              <Card className="p-4">
-                <h3 className="mb-3 text-sm font-semibold">Broadcasts ({bcasts.length})</h3>
-                {bcasts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Sin envíos.</p>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {bcasts.map((b) => {
-                      const exp = new Date(b.expires_at).getTime();
-                      const active = exp > Date.now();
-                      return (
-                        <li key={b.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1 text-xs">
-                              {b.type === "image" ? <ImageIcon className="h-3 w-3" /> : <Megaphone className="h-3 w-3" />}
-                              <span className={active ? "font-bold text-primary" : "text-muted-foreground"}>
-                                {active ? "Activo" : "Expirado"}
-                              </span>
-                              <span className="text-muted-foreground">· vence {new Date(b.expires_at).toLocaleTimeString()}</span>
-                            </div>
-                            <div className="truncate text-xs">{b.message ?? b.image_url}</div>
-                          </div>
-                          <Button size="sm" variant="destructive" onClick={() => deleteBroadcast(b.id)} className="h-7 px-2">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </Card>
+              {bcasts.length > 0 && (
+                <Card className="p-4 space-y-2">
+                  <h3 className="text-sm font-semibold">Anuncios activos / recientes</h3>
+                  <div className="space-y-2">
+                    {bcasts.map((b) => (
+                      <div key={b.id} className="flex items-center justify-between gap-2 border p-2 rounded text-xs">
+                        <div>
+                          <span className="font-bold uppercase">{b.type}</span> · Expira: {new Date(b.expires_at).toLocaleTimeString()}
+                        </div>
+                        <Button size="sm" variant="destructive" onClick={() => deleteBroadcast(b.id)} className="h-6 px-2">
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
             </TabsContent>
 
-
-
             <TabsContent value="event" className="mt-4 space-y-4">
-              <Card className="p-4 space-y-3">
-                <div>
+              <Card className="p-4 space-y-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Sparkles className="h-4 w-4" /> Configurar Multiplicador / Evento
+                </h3>
+                <div className="space-y-2">
                   <Label>Nombre del evento</Label>
                   <Input
-                    placeholder="Sábado de Maratón"
+                    placeholder="Ej: Mes de Exámenes"
                     value={eventName}
                     onChange={(e) => setEventName(e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label>Multiplicador</Label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {[1, 1.5, 2, 2.5, 3].map((v) => (
-                      <Button
-                        key={v}
-                        type="button"
-                        variant={multiplier === v ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setMultiplier(v)}
-                      >
-                        x{v}
-                      </Button>
-                    ))}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Multiplicador</Label>
                     <Input
                       type="number"
-                      step="0.1"
+                      step="0.5"
                       min="1"
-                      className="w-24"
                       value={multiplier}
                       onChange={(e) => setMultiplier(parseFloat(e.target.value) || 1)}
                     />
                   </div>
-                </div>
-                <div className="flex items-end gap-3">
-                  <div className="flex-1">
-                    <Label htmlFor="ev-mins" className="text-xs">
-                      Duración del Evento (en minutos)
-                    </Label>
+                  <div className="space-y-2">
+                    <Label>Duración (min, 0 = indefinido)</Label>
                     <Input
-                      id="ev-mins"
                       type="number"
-                      min={0}
-                      step={1}
-                      placeholder="0 = indefinido"
-                      value={eventMinutes || ""}
-                      onChange={(e) => setEventMinutes(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      min="0"
+                      value={eventMinutes}
+                      onChange={(e) => setEventMinutes(parseInt(e.target.value, 10) || 0)}
                     />
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      Dejá vacío o 0 para evento manual indefinido.
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-center gap-1">
-                    <Label htmlFor="ev-active" className="text-xs">Activo</Label>
-                    <Switch id="ev-active" checked={eventActive} onCheckedChange={setEventActive} />
                   </div>
                 </div>
-
-                {eventActive && eventExpiresAt && (
-                  <div className="rounded-md border border-primary/40 bg-primary/5 p-2 text-center text-xs">
-                    <span className="text-muted-foreground">Vence: </span>
-                    <span className="font-mono font-bold text-primary">
-                      {new Date(eventExpiresAt).toLocaleString("es-AR", { hour12: false })}
-                    </span>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Activar Evento</Label>
+                    <div className="text-xs text-muted-foreground">Aplica el multiplicador a las sesiones</div>
                   </div>
-                )}
-                {eventActive && !eventExpiresAt && (
-                  <div className="rounded-md border border-border bg-muted/40 p-2 text-center text-xs text-muted-foreground">
-                    Evento indefinido (sin auto-cierre)
-                  </div>
-                )}
-
+                  <Switch checked={eventActive} onCheckedChange={setEventActive} />
+                </div>
                 <Button onClick={saveEvent} className="w-full">
-                  <Save className="mr-2 h-4 w-4" /> Guardar
+                  <Save className="mr-2 h-4 w-4" /> Guardar Configuración
                 </Button>
-
               </Card>
             </TabsContent>
 
-            <TabsContent value="users" className="mt-4">
-              <Card className="p-4">
-                <h3 className="mb-3 text-sm font-semibold">Usuarios ({allUsers.length})</h3>
-                {allUsers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Sin usuarios.</p>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {allUsers.map((name) => (
-                      <li key={name} className="flex items-center justify-between gap-2 py-2 text-sm">
-                        <span className="truncate font-medium">{name}</span>
-                        <Button size="sm" variant="outline" onClick={() => renameUser(name)}>
-                          <Pencil className="mr-1 h-3 w-3" /> Renombrar
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Renombra todas las sesiones del usuario; se refleja en el ranking global.
-                </p>
+            <TabsContent value="shop" className="mt-4 space-y-4">
+              <Card className="p-4 space-y-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <ShoppingBag className="h-4 w-4" /> Tipo de Cambio (Economía)
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">1 Hora de estudio da (Monedas)</Label>
+                    <Input
+                      type="number"
+                      value={hoursToCoinsRate}
+                      onChange={(e) => setHoursToCoinsRate(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Comprar 1 Hora cuesta (Monedas)</Label>
+                    <Input
+                      type="number"
+                      value={coinsToHoursRate}
+                      onChange={(e) => setCoinsToHoursRate(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+                <Button onClick={saveEconomyRates} className="w-full">
+                  <Save className="mr-2 h-4 w-4" /> Guardar Tasas de Cambio
+                </Button>
               </Card>
-            </TabsContent>
 
-            <TabsContent value="history" className="mt-4">
-              <Card className="p-4">
-                <h3 className="mb-3 text-sm font-semibold">Últimas sesiones ({history.length})</h3>
-                {history.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Sin registros.</p>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {history.map((s) => (
-                      <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium truncate">{s.user_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {new Date(s.start_time).toLocaleString()} · {s.total_minutes ?? 0} min
-                            {s.multiplier && Number(s.multiplier) > 1 ? ` · x${s.multiplier}` : ""}
-                          </div>
+              <Card className="p-4 space-y-4">
+                <h3 className="text-sm font-semibold">Gestionar Ítems de la Tienda</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <Input
+                    placeholder="Título del ítem"
+                    value={newItemTitle}
+                    onChange={(e) => setNewItemTitle(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Descripción"
+                    value={newItemDesc}
+                    onChange={(e) => setNewItemDesc(e.target.value)}
+                  />
+                  <Input
+                    type="number"
+                    placeholder="Precio en Monedas"
+                    value={newItemPrice}
+                    onChange={(e) => setNewItemPrice(e.target.value)}
+                  />
+                </div>
+                <Button onClick={createShopItem} className="w-full">Agregar Ítem a la Tienda</Button>
+
+                <div className="space-y-2 pt-2">
+                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Ítems Actuales</h4>
+                  {shopItems.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No hay ítems en la tienda.</p>
+                  ) : (
+                    shopItems.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between border p-2 rounded text-xs">
+                        <div>
+                          <span className="font-bold">{item.title}</span> - {item.price} 🪙
+                          {item.description && <p className="text-[10px] text-muted-foreground">{item.description}</p>}
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => editMinutes(s)}>
-                          Editar
+                        <Button size="sm" variant="destructive" onClick={() => deleteShopItem(item.id)} className="h-6 px-2">
+                          <Trash2 className="h-3 w-3" />
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => deleteSession(s.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="users" className="mt-4 space-y-3">
+              <Card className="p-4">
+                <h3 className="mb-3 text-sm font-semibold">Usuarios registrados / Historial</h3>
+                <ul className="divide-y divide-border">
+                  {Array.from(new Map([...active, ...history].map((s) => [s.user_name, s])).values()).map((u) => (
+                    <li key={u.user_name} className="flex items-center justify-between gap-2 py-2 text-sm">
+                      <span className="font-medium truncate">{u.user_name}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          const v = prompt(`Renombrar usuario "${u.user_name}" a:`, u.user_name);
+                          if (!v || v.trim() === u.user_name) return;
+                          await supabase.from('sesiones').update({ user_name: v.trim() }).eq("user_name", u.user_name);
+                          toast.success("Usuario renombrado");
+                          loadAll();
+                        }}
+                        className="h-7 px-2 text-xs"
+                      >
+                        <Pencil className="mr-1 h-3 w-3" /> Renombrar
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="history" className="mt-4 space-y-3">
+              <Card className="p-4">
+                <h3 className="mb-3 text-sm font-semibold">Historial reciente ({history.length})</h3>
+                <div className="max-h-60 overflow-y-auto space-y-1 text-xs">
+                  {history.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between py-1 border-b">
+                      <span>{s.user_name} · {s.total_minutes ?? 0} min</span>
+                      <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => deleteSession(s.id)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </Card>
             </TabsContent>
 
@@ -989,86 +899,26 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               <PastRankingsManager />
             </TabsContent>
 
-
-
-            <TabsContent value="diag" className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Card className="p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Próximo corte global</div>
-                  <div className="mt-1 font-mono text-lg font-bold">
-                    {(() => {
-                      const total = Math.max(0, Math.floor(msToNextHourTick / 1000));
-                      const m = Math.floor(total / 60);
-                      const s = total % 60;
-                      return `${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
-                    })()}
-                  </div>
-                </Card>
-                <Card className="p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">IP Autorizada</div>
-                  <div className="mt-1 font-mono text-lg font-bold">{ALLOWED_IP}</div>
-                </Card>
-                <Card className="p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Usuarios en la mira</div>
-                  <div className="mt-1 font-mono text-lg font-bold">{active.length}</div>
-                </Card>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => runDiagnostic(true)}
-                  disabled={diagRunning}
-                  size="lg"
-                  className="font-bold uppercase tracking-wider"
-                >
-                  <PlayCircle className="mr-2 h-5 w-5" />
-                  Forzar Chequeo Ahora (Simular Hora en Punto)
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => runDiagnostic(false)}
-                  disabled={diagRunning}
-                >
-                  <Zap className="mr-2 h-4 w-4" />
-                  Ejecutar Real (cortes verdaderos)
-                </Button>
-                <Button variant="outline" onClick={() => setDiagLogs([])} disabled={diagRunning}>
-                  <Trash2 className="mr-2 h-3 w-3" />
-                  Limpiar
-                </Button>
-              </div>
-
-              <div
-                className="h-[360px] overflow-auto rounded-md border border-green-900/50 bg-black p-3 font-mono text-[11px] leading-relaxed text-green-400 shadow-inner"
-                style={{ whiteSpace: "pre-wrap" }}
-              >
-                {diagLogs.length === 0 ? (
-                  <div className="text-green-700">
-                    {"// Consola de Diagnóstico del Servidor"}
-                    {"\n// Esperando eventos... Presioná 'Forzar Chequeo' para simular."}
-                  </div>
-                ) : (
-                  diagLogs.map((l, i) => (
-                    <div
-                      key={i}
-                      className={
-                        l.includes("MISMATCH") || l.includes("CORTE") || l.includes("❌")
-                          ? "text-red-400"
-                          : l.includes("MATCH") || l.includes("✅")
-                            ? "text-green-300"
-                            : l.includes("🔎") || l.includes("INICIANDO") || l.includes("SIMULACIÓN")
-                              ? "text-yellow-300"
-                              : "text-green-400"
-                      }
-                    >
-                      {l}
-                    </div>
-                  ))
-                )}
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Reglas: un usuario es MATCH si su último latido es menor a 70 min. MISMATCH → corte de emergencia en el último latido válido (no se pierden los minutos blindados).
-              </p>
+            <TabsContent value="diag" className="mt-4 space-y-3">
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Diagnóstico y Chequeos Globales</h3>
+                  <Button
+                    size="sm"
+                    onClick={() => runDiagnostic(false)}
+                    disabled={diagRunning}
+                  >
+                    Ejecutar Chequeo Ahora
+                  </Button>
+                </div>
+                <div className="bg-black text-green-400 font-mono text-[11px] p-3 rounded h-48 overflow-y-auto space-y-1">
+                  {diagLogs.length === 0 ? (
+                    <div>[Sistema] Esperando ejecución o eventos automáticos...</div>
+                  ) : (
+                    diagLogs.map((l, idx) => <div key={idx}>{l}</div>)
+                  )}
+                </div>
+              </Card>
             </TabsContent>
           </Tabs>
         )}
