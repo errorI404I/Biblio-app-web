@@ -19,11 +19,12 @@ export const Route = createFileRoute("/")({
 
 const ALLOWED_IP = "131.221.0.8";
 const STORAGE_KEY = "horasbiblio_user_name";
-const HEARTBEAT_MS = 60 * 60 * 1000;
-const OFFLINE_GRACE_MS = 60 * 1000;
-const OPEN_HOUR_AR = 7;
-const CLOSE_HOUR_AR = 20;
+const HEARTBEAT_MS = 60 * 60 * 1000; // 1 hora (guardado progresivo)
+const OFFLINE_GRACE_MS = 60 * 1000; // 1 minuto
+const OPEN_HOUR_AR = 7;   // 07:00 hs apertura
+const CLOSE_HOUR_AR = 20; // 20:00 hs cierre general
 
+// Argentina = UTC-3 (sin DST)
 function getArgHour(d: Date = new Date()) {
   return (d.getUTCHours() + 24 - 3) % 24;
 }
@@ -31,6 +32,7 @@ function isWithinOpenHours(d: Date = new Date()) {
   const h = getArgHour(d);
   return h >= OPEN_HOUR_AR && h < CLOSE_HOUR_AR;
 }
+// Próximo 20:00 AR (UTC = 23:00) en ms
 function msToNextClose() {
   const now = Date.now();
   const t = new Date();
@@ -38,6 +40,7 @@ function msToNextClose() {
   if (t.getTime() <= now) t.setUTCDate(t.getUTCDate() + 1);
   return t.getTime() - now;
 }
+// Devuelve el ISO del 20:00 AR del día actual (o el más reciente ya pasado)
 function lastCloseIso() {
   const t = new Date();
   t.setUTCHours(CLOSE_HOUR_AR + 3, 0, 0, 0);
@@ -66,36 +69,76 @@ async function fetchPublicIp(signal?: AbortSignal): Promise<string | null> {
   }
 }
 
-async function getActiveMultiplier(): Promise<ActiveEvent> {
+async function getActiveMultiplier(userName?: string): Promise<ActiveEvent> {
   const { data } = await supabase
     .from("settings")
     .select("multiplier,event_name,active,expires_at" as any)
     .eq("key", "multiplier")
     .maybeSingle();
-  const off: ActiveEvent = { multiplier: 1, event_name: null, active: false, expires_at: null };
-  if (!data || !(data as any).active) return off;
-  const expiresAt = (data as any).expires_at as string | null;
-  if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
-    await supabase
-      .from("settings")
-      .update({ active: false, expires_at: null, updated_at: new Date().toISOString() } as any)
-      .eq("key", "multiplier");
-    return off;
+    
+  let activeMult = 1;
+  let activeName: string | null = null;
+  let activeExpires: string | null = null;
+  let isGlobalActive = false;
+
+  if (data && (data as any).active) {
+    const expiresAt = (data as any).expires_at as string | null;
+    if (!expiresAt || new Date(expiresAt).getTime() > Date.now()) {
+      activeMult = Number((data as any).multiplier) || 1;
+      activeName = (data as any).event_name;
+      activeExpires = expiresAt;
+      isGlobalActive = true;
+    } else {
+      await supabase
+        .from("settings")
+        .update({ active: false, expires_at: null, updated_at: new Date().toISOString() } as any)
+        .eq("key", "multiplier");
+    }
   }
+
+  // Verificar si el usuario tiene activo su ítem personal "multiplicador_24h" para las horas
+  if (userName) {
+    const { data: userInv } = await supabase
+      .from("user_inventory")
+      .select("expires_at, is_active")
+      .eq("user_name", userName)
+      .eq("item_id", "multiplicador_24h")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (userInv && userInv.expires_at) {
+      if (new Date(userInv.expires_at).getTime() > Date.now()) {
+        const personalMult = 2; // Multiplicador de horas del ítem personal
+        if (personalMult > activeMult) {
+          activeMult = personalMult;
+          activeName = "Enfoque Extremo 24h ⚡";
+          activeExpires = userInv.expires_at;
+          isGlobalActive = true;
+        }
+      } else {
+        await supabase
+          .from("user_inventory")
+          .update({ is_active: false })
+          .eq("user_name", userName)
+          .eq("item_id", "multiplicador_24h");
+      }
+    }
+  }
+
   return {
-    multiplier: Number((data as any).multiplier) || 1,
-    event_name: (data as any).event_name,
-    active: true,
-    expires_at: expiresAt,
+    multiplier: activeMult,
+    event_name: activeName,
+    active: isGlobalActive,
+    expires_at: activeExpires,
   };
 }
 
-async function closeSessionAt(sessionId: string, startTime: string, endIso: string) {
+async function closeSessionAt(sessionId: string, startTime: string, endIso: string, userName?: string) {
   const rawMinutes = Math.max(
     1,
     Math.round((new Date(endIso).getTime() - new Date(startTime).getTime()) / 60000)
   );
-  const ev = await getActiveMultiplier();
+  const ev = await getActiveMultiplier(userName);
   const minutes = Math.round(rawMinutes * ev.multiplier);
   await supabase
     .from('sesiones')
@@ -124,10 +167,11 @@ async function massCloseAt(endIso: string) {
     .select("id,start_time,user_name")
     .is("end_time", null);
   if (!sessions || sessions.length === 0) return 0;
-  const ev = await getActiveMultiplier();
+  
   const endMs = new Date(endIso).getTime();
   let count = 0;
   for (const s of sessions) {
+    const ev = await getActiveMultiplier(s.user_name);
     const raw = Math.max(
       1,
       Math.round((endMs - new Date(s.start_time).getTime()) / 60000)
@@ -207,6 +251,7 @@ function Index() {
   const [insult, setInsult] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
@@ -218,13 +263,15 @@ function Index() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Live event banner — poll every 5s
   useEffect(() => {
-    const load = () => getActiveMultiplier().then(setActiveEvent);
+    const load = () => getActiveMultiplier(userName).then(setActiveEvent);
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [userName]);
 
+  // Ticker dedicado al countdown del evento (1s)
   const [eventNow, setEventNow] = useState(Date.now());
   useEffect(() => {
     if (!activeEvent.active || !activeEvent.expires_at) return;
@@ -236,9 +283,9 @@ function Index() {
     if (!activeEvent.active || !activeEvent.expires_at) return;
     const remaining = new Date(activeEvent.expires_at).getTime() - eventNow;
     if (remaining <= 0) {
-      getActiveMultiplier().then(setActiveEvent);
+      getActiveMultiplier(userName).then(setActiveEvent);
     }
-  }, [eventNow, activeEvent.active, activeEvent.expires_at]);
+  }, [eventNow, activeEvent.active, activeEvent.expires_at, userName]);
 
   const isAllowed = ip === ALLOWED_IP;
   const activeSessionRef = useRef<Session | null>(null);
@@ -246,11 +293,13 @@ function Index() {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
+  // Load saved name
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) setUserName(saved);
   }, []);
 
+  // Fetch IP
   useEffect(() => {
     fetchPublicIp().then((v) => {
       setIp(v);
@@ -258,6 +307,7 @@ function Index() {
     });
   }, []);
 
+  // Tick clock
   useEffect(() => {
     if (!activeSession) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -276,9 +326,8 @@ function Index() {
       supabase.from('sesiones').select("user_name,total_minutes,end_time,start_time"),
       supabase.from('user_inventory').select("user_name,item_id,is_active")
     ]);
-
     if (!sessionsData) return;
-
+    
     const minutesMap = new Map<string, number>();
     const onlineSet = new Set<string>();
     const userSessionsMap = new Map<string, { start_time?: string | null }[]>();
@@ -294,16 +343,15 @@ function Index() {
       userSessionsMap.set(r.user_name, userList);
     }
 
-    // Mapear insignias o frases cosméticas basadas en inventario (ej: badge_legend o activas)
     const userBadgeMap = new Map<string, string>();
     if (inventoryData) {
       for (const inv of inventoryData) {
         if (inv.item_id === 'badge_legend') {
-          userBadgeMap.set(inv.user_name, '🏷️ Estudiante Legendario');
-        } else if (inv.item_id === 'cafe_biblio') {
-          userBadgeMap.set(inv.user_name, '☕ Amante del Café');
+          userBadgeMap.set(inv.user_name, '🏆 Estudiante Legendario');
         } else if (inv.item_id === 'multiplicador_24h') {
           userBadgeMap.set(inv.user_name, '⚡ Enfoque Extremo');
+        } else if (inv.item_id === 'cafe_biblio') {
+          userBadgeMap.set(inv.user_name, '☕ Amante del Café');
         } else if (inv.item_id === 'ruleta_extra') {
           userBadgeMap.set(inv.user_name, '🎲 Suertudo');
         }
@@ -352,7 +400,7 @@ function Index() {
       }
       const stalePenalty = nowMs - lastSeenMs > staleAfter;
       if (stalePenalty && row.last_seen) {
-        await closeSessionAt(row.id, row.start_time, row.last_seen);
+        await closeSessionAt(row.id, row.start_time, row.last_seen, name);
       } else {
         await supabase
           .from('sesiones')
@@ -479,7 +527,8 @@ function Index() {
       const minutes = await closeSessionAt(
         activeSession.id,
         activeSession.start_time,
-        lastValidIso
+        lastValidIso,
+        userName
       );
       setBusy(false);
       setActiveSession(null);
@@ -492,7 +541,8 @@ function Index() {
     const minutes = await closeSessionAt(
       activeSession.id,
       activeSession.start_time,
-      new Date().toISOString()
+      new Date().toISOString(),
+      userName
     );
     setBusy(false);
     setActiveSession(null);
@@ -516,7 +566,7 @@ function Index() {
           const lastSeenIso =
             session.last_seen ?? new Date(lastVerified ?? Date.now()).toISOString();
           try {
-            await closeSessionAt(session.id, session.start_time, lastSeenIso);
+            await closeSessionAt(session.id, session.start_time, lastSeenIso, userName);
           } catch {}
           setActiveSession(null);
           toast.error("Sesión finalizada: se perdió la conexión a internet.");
@@ -535,7 +585,8 @@ function Index() {
         const minutes = await closeSessionAt(
           session.id,
           session.start_time,
-          lastValidIso
+          lastValidIso,
+          userName
         );
         setIp(currentIp);
         setActiveSession(null);
@@ -575,7 +626,7 @@ function Index() {
       clearTimeout(timeout);
       if (interval) clearInterval(interval);
     };
-  }, [activeSession, loadLeaders, lastVerified]);
+  }, [activeSession, loadLeaders, lastVerified, userName]);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -908,7 +959,6 @@ function Index() {
                               {i + 1}
                             </span>
                             
-                            {/* Contenedor del nombre, insignia y estado sin modificar el tamaño del cuadro */}
                             <div className="flex flex-col">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{l.user_name}</span>
@@ -932,7 +982,6 @@ function Index() {
                                 )}
                               </div>
 
-                              {/* Insignia / frase cosmética comprada en la tienda debajo del nombre, bien pequeña */}
                               {l.badge && (
                                 <span className="text-[10px] text-muted-foreground tracking-wide font-medium mt-0.5">
                                   {l.badge}
