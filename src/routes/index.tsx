@@ -19,12 +19,11 @@ export const Route = createFileRoute("/")({
 
 const ALLOWED_IP = "131.221.0.8";
 const STORAGE_KEY = "horasbiblio_user_name";
-const HEARTBEAT_MS = 60 * 60 * 1000; // 1 hora (guardado progresivo)
-const OFFLINE_GRACE_MS = 60 * 1000; // 1 minuto
-const OPEN_HOUR_AR = 7;   // 07:00 hs apertura
-const CLOSE_HOUR_AR = 20; // 20:00 hs cierre general
+const HEARTBEAT_MS = 60 * 60 * 1000;
+const OFFLINE_GRACE_MS = 60 * 1000;
+const OPEN_HOUR_AR = 7;
+const CLOSE_HOUR_AR = 20;
 
-// Argentina = UTC-3 (sin DST)
 function getArgHour(d: Date = new Date()) {
   return (d.getUTCHours() + 24 - 3) % 24;
 }
@@ -32,7 +31,6 @@ function isWithinOpenHours(d: Date = new Date()) {
   const h = getArgHour(d);
   return h >= OPEN_HOUR_AR && h < CLOSE_HOUR_AR;
 }
-// Próximo 20:00 AR (UTC = 23:00) en ms
 function msToNextClose() {
   const now = Date.now();
   const t = new Date();
@@ -40,7 +38,6 @@ function msToNextClose() {
   if (t.getTime() <= now) t.setUTCDate(t.getUTCDate() + 1);
   return t.getTime() - now;
 }
-// Devuelve el ISO del 20:00 AR del día actual (o el más reciente ya pasado)
 function lastCloseIso() {
   const t = new Date();
   t.setUTCHours(CLOSE_HOUR_AR + 3, 0, 0, 0);
@@ -78,7 +75,6 @@ async function getActiveMultiplier(): Promise<ActiveEvent> {
   const off: ActiveEvent = { multiplier: 1, event_name: null, active: false, expires_at: null };
   if (!data || !(data as any).active) return off;
   const expiresAt = (data as any).expires_at as string | null;
-  // Auto-apagar si ya expiró
   if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
     await supabase
       .from("settings")
@@ -93,7 +89,6 @@ async function getActiveMultiplier(): Promise<ActiveEvent> {
     expires_at: expiresAt,
   };
 }
-
 
 async function closeSessionAt(sessionId: string, startTime: string, endIso: string) {
   const rawMinutes = Math.max(
@@ -148,10 +143,52 @@ async function massCloseAt(endIso: string) {
         event_name: ev.active ? ev.event_name : null,
       })
       .eq("id", s.id)
-      .is("end_time", null); // idempotente entre múltiples clientes
+      .is("end_time", null);
     if (!error) count++;
   }
   return count;
+}
+
+function calculateStreak(sessions: { start_time?: string | null }[]): number {
+  if (!sessions || sessions.length === 0) return 0;
+
+  const uniqueDates = Array.from(
+    new Set(
+      sessions.map((s) => {
+        const rawDate = s.start_time;
+        if (!rawDate) return null;
+        return new Date(rawDate).toISOString().split("T")[0];
+      }).filter(Boolean)
+    )
+  ).sort((a, b) => (b! > a! ? 1 : -1)) as string[];
+
+  if (uniqueDates.length === 0) return 0;
+
+  let streak = 0;
+  const today = new Date().toISOString().split("T")[0];
+  
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = yesterdayDate.toISOString().split("T")[0];
+
+  const latestDate = uniqueDates[0];
+  if (latestDate !== today && latestDate !== yesterday) {
+    return 0;
+  }
+
+  let expectedDate = new Date(latestDate);
+  
+  for (let i = 0; i < uniqueDates.length; i++) {
+    const expectedStr = expectedDate.toISOString().split("T")[0];
+    if (uniqueDates[i] === expectedStr) {
+      streak++;
+      expectedDate.setDate(expectedDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  return streak;
 }
 
 function Index() {
@@ -161,7 +198,7 @@ function Index() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [leaders, setLeaders] = useState<{ user_name: string; minutes: number; online: boolean }[]>([]);
+  const [leaders, setLeaders] = useState<{ user_name: string; minutes: number; online: boolean; streak: number }[]>([]);
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [lastVerified, setLastVerified] = useState<number | null>(null);
   const [verifiedFlash, setVerifiedFlash] = useState(false);
@@ -170,7 +207,6 @@ function Index() {
   const [insult, setInsult] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
@@ -182,7 +218,6 @@ function Index() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Live event banner — poll every 5s; auto-tick local clock every 1s for countdown
   useEffect(() => {
     const load = () => getActiveMultiplier().then(setActiveEvent);
     load();
@@ -190,7 +225,6 @@ function Index() {
     return () => clearInterval(t);
   }, []);
 
-  // Ticker dedicado al countdown del evento (1s) — corre solo si hay expires_at
   const [eventNow, setEventNow] = useState(Date.now());
   useEffect(() => {
     if (!activeEvent.active || !activeEvent.expires_at) return;
@@ -198,7 +232,6 @@ function Index() {
     return () => clearInterval(t);
   }, [activeEvent.active, activeEvent.expires_at]);
 
-  // Si el evento expiró localmente, refrescar inmediatamente
   useEffect(() => {
     if (!activeEvent.active || !activeEvent.expires_at) return;
     const remaining = new Date(activeEvent.expires_at).getTime() - eventNow;
@@ -207,20 +240,17 @@ function Index() {
     }
   }, [eventNow, activeEvent.active, activeEvent.expires_at]);
 
-
   const isAllowed = ip === ALLOWED_IP;
   const activeSessionRef = useRef<Session | null>(null);
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
-  // Load saved name
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) setUserName(saved);
   }, []);
 
-  // Fetch IP
   useEffect(() => {
     fetchPublicIp().then((v) => {
       setIp(v);
@@ -228,14 +258,12 @@ function Index() {
     });
   }, []);
 
-  // Tick clock
   useEffect(() => {
     if (!activeSession) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [activeSession]);
 
-  // Tick coarse (cada 30s) para refrescar gate de horario fuera/dentro
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
@@ -246,22 +274,33 @@ function Index() {
   const loadLeaders = useCallback(async () => {
     const { data } = await supabase
       .from('sesiones')
-      .select("user_name,total_minutes,end_time");
+      .select("user_name,total_minutes,end_time,start_time");
     if (!data) return;
     const minutesMap = new Map<string, number>();
     const onlineSet = new Set<string>();
+    const userSessionsMap = new Map<string, { start_time?: string | null }[]>();
+
     for (const r of data) {
       if (r.total_minutes != null) {
         minutesMap.set(r.user_name, (minutesMap.get(r.user_name) ?? 0) + (r.total_minutes ?? 0));
       }
       if (r.end_time === null) onlineSet.add(r.user_name);
+
+      const userList = userSessionsMap.get(r.user_name) ?? [];
+      userList.push({ start_time: r.start_time });
+      userSessionsMap.set(r.user_name, userList);
     }
     const names = new Set<string>([...minutesMap.keys(), ...onlineSet]);
-    const arr = Array.from(names, (user_name) => ({
-      user_name,
-      minutes: minutesMap.get(user_name) ?? 0,
-      online: onlineSet.has(user_name),
-    })).sort((a, b) => b.minutes - a.minutes);
+    const arr = Array.from(names, (user_name) => {
+      const userSessions = userSessionsMap.get(user_name) ?? [];
+      const streak = calculateStreak(userSessions);
+      return {
+        user_name,
+        minutes: minutesMap.get(user_name) ?? 0,
+        online: onlineSet.has(user_name),
+        streak,
+      };
+    }).sort((a, b) => b.minutes - a.minutes);
     setLeaders(arr);
   }, []);
 
@@ -289,7 +328,6 @@ function Index() {
         restored = row as Session;
         continue;
       }
-      // Sesión huérfana: cerrar con last_seen si es válido, sino descartar (0 min)
       const stalePenalty = nowMs - lastSeenMs > staleAfter;
       if (stalePenalty && row.last_seen) {
         await closeSessionAt(row.id, row.start_time, row.last_seen);
@@ -310,7 +348,6 @@ function Index() {
     }
   }, [loadLeaders]);
 
-  // Restore active session when name available
   useEffect(() => {
     if (userName) checkActiveSession(userName);
   }, [userName, checkActiveSession]);
@@ -319,7 +356,6 @@ function Index() {
     loadLeaders();
   }, [loadLeaders]);
 
-  // Realtime: refrescar ranking cuando cambien sesiones
   useEffect(() => {
     const channel = supabase
       .channel("sessions-leaderboard")
@@ -334,7 +370,6 @@ function Index() {
     };
   }, [loadLeaders]);
 
-  // Cierre General Automático a las 20:00 hs (AR)
   useEffect(() => {
     let cancelled = false;
     const fire = async () => {
@@ -351,7 +386,6 @@ function Index() {
       const ms = msToNextClose();
       return setTimeout(async () => {
         await fire();
-        // reprogramar para el próximo día
         if (!cancelled) timer = schedule();
       }, ms);
     };
@@ -378,7 +412,6 @@ function Index() {
     localStorage.setItem(STORAGE_KEY, name);
     setBusy(true);
 
-    // 1) Sanitización: cerrar TODAS las sesiones huérfanas abiertas de este usuario (0 min)
     const { data: orphans } = await supabase
       .from('sesiones')
       .select("id,start_time,last_seen")
@@ -396,7 +429,6 @@ function Index() {
       );
     }
 
-    // 2) Nueva sesión con start_time = ahora (UTC) — contador arranca en 00:00:00
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
       .from('sesiones')
@@ -416,11 +448,9 @@ function Index() {
   const handleCheckOut = async () => {
     if (!activeSession) return;
     setBusy(true);
-    // Validar IP antes de cerrar manualmente
     const currentIp = await fetchPublicIp();
     setIp(currentIp);
     if (currentIp !== ALLOWED_IP) {
-      // Castigo: cerrar en el último chequeo válido (last_seen) — no se suman minutos fuera de la red
       const lastValidIso =
         activeSession.last_seen ??
         new Date(lastVerified ?? new Date(activeSession.start_time).getTime()).toISOString();
@@ -448,7 +478,6 @@ function Index() {
     loadLeaders();
   };
 
-  // Heartbeat: cada 30 min re-validar IP, actualizar last_seen, manejar offline
   useEffect(() => {
     if (!activeSession) return;
     let cancelled = false;
@@ -466,9 +495,7 @@ function Index() {
             session.last_seen ?? new Date(lastVerified ?? Date.now()).toISOString();
           try {
             await closeSessionAt(session.id, session.start_time, lastSeenIso);
-          } catch {
-            // se recupera al volver
-          }
+          } catch {}
           setActiveSession(null);
           toast.error("Sesión finalizada: se perdió la conexión a internet.");
           loadLeaders();
@@ -480,7 +507,6 @@ function Index() {
       if (cancelled) return;
 
       if (currentIp !== ALLOWED_IP) {
-        // Cerrar en el último chequeo válido — no se pierde lo acumulado, no se suma tiempo fuera de la red
         const lastValidIso =
           session.last_seen ??
           new Date(lastVerified ?? new Date(session.start_time).getTime()).toISOString();
@@ -508,7 +534,6 @@ function Index() {
       setTimeout(() => setVerifiedFlash(false), 2500);
     };
 
-    // Reloj global: programar el próximo chequeo en la siguiente hora en punto (XX:00)
     const msToNextHour = () => {
       const n = new Date();
       const next = new Date(n);
@@ -520,7 +545,6 @@ function Index() {
     const timeout = setTimeout(() => {
       if (cancelled) return;
       runHeartbeat();
-      // Luego, cada hora exacta (3.600.000 ms)
       interval = setInterval(runHeartbeat, 60 * 60 * 1000);
     }, msToNextHour());
 
@@ -531,7 +555,6 @@ function Index() {
     };
   }, [activeSession, loadLeaders, lastVerified]);
 
-  // Al cerrar pestaña: actualizar last_seen (best-effort con keepalive)
   useEffect(() => {
     if (!activeSession) return;
     const handler = () => {
@@ -550,9 +573,7 @@ function Index() {
           body: JSON.stringify({ last_seen: new Date().toISOString() }),
           keepalive: true,
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
     window.addEventListener("beforeunload", handler);
     window.addEventListener("pagehide", handler);
@@ -627,7 +648,7 @@ function Index() {
         {activeEvent.active && activeEvent.multiplier > 1 && (() => {
           const expMs = activeEvent.expires_at ? new Date(activeEvent.expires_at).getTime() : null;
           const remainMs = expMs ? Math.max(0, expMs - eventNow) : null;
-          if (expMs && remainMs === 0) return null; // limpieza fluida cuando llega 00:00
+          if (expMs && remainMs === 0) return null;
           const fmt = (ms: number) => {
             const total = Math.floor(ms / 1000);
             const h = Math.floor(total / 3600);
@@ -662,7 +683,6 @@ function Index() {
           );
         })()}
 
-
         <Tabs defaultValue="dashboard" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
@@ -673,7 +693,6 @@ function Index() {
               <Archive className="mr-2 h-4 w-4" /> Historial
             </TabsTrigger>
           </TabsList>
-
 
           <TabsContent value="dashboard" className="mt-6 space-y-4">
             <Card className="p-5">
@@ -867,6 +886,13 @@ function Index() {
                               {i + 1}
                             </span>
                             <span className="font-medium">{l.user_name}</span>
+
+                            {l.streak > 0 && (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                                🔥 {l.streak} {l.streak === 1 ? "día" : "días"}
+                              </span>
+                            )}
+
                             {l.online ? (
                               <span className="relative flex h-3 w-3" title="Conectado ahora">
                                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
@@ -895,7 +921,6 @@ function Index() {
             <PastRankingsPublic />
           </TabsContent>
         </Tabs>
-
       </div>
     </div>
   );

@@ -147,7 +147,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     else toast.error("Clave incorrecta");
   };
 
-  // Función para procesar y reinsertar datos desde el Excel exportado previamente
   const handleRestoreBackup = async () => {
     if (!restoreFile) {
       toast.error("Selecciona un archivo .xlsx primero");
@@ -161,8 +160,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const workbook = XLSX.read(dataBuffer, { type: "array" });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      
-      // Convertir la hoja a formato JSON con las cabeceras generadas por el sistema
       const rows: any[] = XLSX.utils.sheet_to_json(worksheet);
 
       if (!rows || rows.length === 0) {
@@ -173,13 +170,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const nowIso = new Date().toISOString();
 
       for (const row of rows) {
-        // Mapeamos las columnas del Excel generado por el sistema:
-        // "Nombre de Usuario" y "Minutos Totales" (o Horas Totales Acumuladas)
         const userName = row["Nombre de Usuario"] || row["user_name"];
         const totalMinutes = row["Minutos Totales"] || (row["Horas Totales Acumuladas"] ? Math.round(row["Horas Totales Acumuladas"] * 60) : 0);
 
         if (userName && totalMinutes > 0) {
-          // Insertamos como una sesión cerrada que alimenta directamente el ranking
           const { error } = await supabase.from('sesiones').insert({
             user_name: userName,
             start_time: nowIso,
@@ -251,6 +245,21 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     setNewItemTitle("");
     setNewItemDesc("");
     setNewItemPrice("");
+    loadAll();
+  };
+
+  // Función para actualizar precio de un ítem existente en la tienda
+  const updateShopItemPrice = async (id: string, newPrice: string) => {
+    const priceNum = parseFloat(newPrice);
+    if (isNaN(priceNum) || priceNum < 0) return toast.error("Precio inválido");
+
+    const { error } = await supabase
+      .from("shop_items")
+      .update({ price: priceNum })
+      .eq("id", id);
+
+    if (error) return toast.error("Error al actualizar precio");
+    toast.success("Precio actualizado con éxito");
     loadAll();
   };
 
@@ -762,170 +771,137 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     />
                   </div>
                 </div>
-                <Button onClick={saveEconomyRates} className="w-full">
-                  <Save className="mr-2 h-4 w-4" /> Guardar Tasas de Cambio
-                </Button>
+                <Button onClick={saveEconomyRates} size="sm">Guardar Tasas</Button>
               </Card>
 
+              {/* SECCIÓN NUEVA: GESTIÓN Y CAMBIO DE PRECIOS DE ÍTEMS */}
               <Card className="p-4 space-y-4">
-                <h3 className="text-sm font-semibold">Gestionar Ítems de la Tienda</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <Input
-                    placeholder="Título del ítem"
-                    value={newItemTitle}
-                    onChange={(e) => setNewItemTitle(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Descripción"
-                    value={newItemDesc}
-                    onChange={(e) => setNewItemDesc(e.target.value)}
-                  />
-                  <Input
-                    type="number"
-                    placeholder="Precio en Monedas"
-                    value={newItemPrice}
-                    onChange={(e) => setNewItemPrice(e.target.value)}
-                  />
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <ShoppingBag className="h-4 w-4" /> Gestión y Precios de Ítems
+                </h3>
+                
+                <div className="space-y-3 border-b pb-4">
+                  <h4 className="text-xs font-bold uppercase text-muted-foreground">Crear nuevo ítem</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Título"
+                      value={newItemTitle}
+                      onChange={(e) => setNewItemTitle(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Descripción"
+                      value={newItemDesc}
+                      onChange={(e) => setNewItemDesc(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        placeholder="Precio (🪙)"
+                        value={newItemPrice}
+                        onChange={(e) => setNewItemPrice(e.target.value)}
+                      />
+                      <Button onClick={createShopItem}>Crear</Button>
+                    </div>
+                  </div>
                 </div>
-                <Button onClick={createShopItem} className="w-full">Agregar Ítem a la Tienda</Button>
 
-                <div className="space-y-2 pt-2">
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Ítems Actuales</h4>
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase text-muted-foreground">Ítems actuales en la tienda</h4>
                   {shopItems.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No hay ítems en la tienda.</p>
+                    <p className="text-sm text-muted-foreground">No hay ítems registrados.</p>
                   ) : (
-                    shopItems.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between border p-2 rounded text-xs">
-                        <div>
-                          <span className="font-bold">{item.title}</span> - {item.price} 🪙
-                          {item.description && <p className="text-[10px] text-muted-foreground">{item.description}</p>}
+                    <div className="space-y-2">
+                      {shopItems.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between gap-3 border p-2 rounded-lg text-sm">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold truncate">{item.title}</div>
+                            <div className="text-xs text-muted-foreground truncate">{item.description || "Sin descripción"}</div>
+                          </div>
+                          
+                          {/* Modificar precio de forma rápida inline */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">🪙</span>
+                            <Input
+                              type="number"
+                              defaultValue={item.price}
+                              className="w-20 h-8 text-xs font-mono"
+                              onBlur={(e) => {
+                                if (Number(e.target.value) !== item.price) {
+                                  updateShopItemPrice(item.id, e.target.value);
+                                }
+                              }}
+                            />
+                            <Button 
+                              size="sm" 
+                              variant="destructive" 
+                              onClick={() => deleteShopItem(item.id)}
+                              className="h-8 px-2"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
-                        <Button size="sm" variant="destructive" onClick={() => deleteShopItem(item.id)} className="h-6 px-2">
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))
+                      ))}
+                    </div>
                   )}
                 </div>
               </Card>
             </TabsContent>
 
-            {/* NUEVA PESTAÑA: RESTAURAR BACKUP EXCEL */}
             <TabsContent value="restore" className="mt-4 space-y-4">
-              <Card className="p-4 space-y-4">
+              <Card className="p-4 space-y-3">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
-                  <Upload className="h-4 w-4" /> Restaurar / Cargar Backup Cuatrimestral (.xlsx)
+                  <Upload className="h-4 w-4" /> Restaurar Backup de Ranking (.xlsx)
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Selecciona el archivo `.xlsx` que exportaste previamente en un cierre de temporada. El sistema leerá automáticamente las columnas <strong>"Nombre de Usuario"</strong> y <strong>"Minutos Totales"</strong> para inyectarlos como nuevos datos al ranking actual.
+                  Subí un archivo Excel exportado previamente para reinsertar las horas acumuladas al sistema actual.
                 </p>
-
-                <label
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const f = e.dataTransfer.files?.[0];
-                    if (f && (f.name.endsWith(".xlsx") || f.name.endsWith(".xls"))) {
-                      setRestoreFile(f);
-                    } else {
-                      toast.error("Por favor, sube un archivo Excel válido (.xlsx)");
-                    }
-                  }}
-                  className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-6 text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/40"
-                >
-                  <Upload className="h-6 w-6 text-primary" />
-                  <span className="font-medium">Arrastra tu archivo .xlsx aquí o haz clic para seleccionarlo</span>
-                  <span className="text-[10px] opacity-70">Compatible con los reportes generados por este sistema</span>
-                  <input
+                <div className="flex items-center gap-2">
+                  <Input
                     type="file"
                     accept=".xlsx, .xls"
-                    className="hidden"
                     onChange={(e) => setRestoreFile(e.target.files?.[0] ?? null)}
                   />
-                </label>
-
-                {restoreFile && (
-                  <div className="flex items-center justify-between rounded-md border p-3 bg-muted/20">
-                    <div className="text-xs font-medium truncate">📁 {restoreFile.name}</div>
-                    <Button size="sm" variant="ghost" onClick={() => setRestoreFile(null)}>Quitar</Button>
-                  </div>
-                )}
-
-                <Button 
-                  onClick={handleRestoreBackup} 
-                  disabled={!restoreFile || restoring} 
-                  className="w-full font-bold uppercase tracking-wider"
-                >
-                  {restoring ? "Procesando e importando..." : "Importar y Sumar al Ranking"}
-                </Button>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="users" className="mt-4 space-y-3">
-              <Card className="p-4">
-                <h3 className="mb-3 text-sm font-semibold">Usuarios registrados / Historial</h3>
-                <ul className="divide-y divide-border">
-                  {Array.from(new Map([...active, ...history].map((s) => [s.user_name, s])).values()).map((u) => (
-                    <li key={u.user_name} className="flex items-center justify-between gap-2 py-2 text-sm">
-                      <span className="font-medium truncate">{u.user_name}</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={async () => {
-                          const v = prompt(`Renombrar usuario "${u.user_name}" a:`, u.user_name);
-                          if (!v || v.trim() === u.user_name) return;
-                          await supabase.from('sesiones').update({ user_name: v.trim() }).eq("user_name", u.user_name);
-                          toast.success("Usuario renombrado");
-                          loadAll();
-                        }}
-                        className="h-7 px-2 text-xs"
-                      >
-                        <Pencil className="mr-1 h-3 w-3" /> Renombrar
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="history" className="mt-4 space-y-3">
-              <Card className="p-4">
-                <h3 className="mb-3 text-sm font-semibold">Historial reciente ({history.length})</h3>
-                <div className="max-h-60 overflow-y-auto space-y-1 text-xs">
-                  {history.map((s) => (
-                    <div key={s.id} className="flex items-center justify-between py-1 border-b">
-                      <span>{s.user_name} · {s.total_minutes ?? 0} min</span>
-                      <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={() => deleteSession(s.id)}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
+                  <Button onClick={handleRestoreBackup} disabled={restoring || !restoreFile}>
+                    {restoring ? "Restaurando..." : "Restaurar Backup"}
+                  </Button>
                 </div>
               </Card>
             </TabsContent>
 
-            <TabsContent value="past" className="mt-4">
+            <TabsContent value="users" className="mt-4 space-y-4">
+              <Card className="p-4">
+                <h3 className="text-sm font-semibold mb-2">Gestión de Usuarios Activos</h3>
+                <p className="text-xs text-muted-foreground">Panel de control general de usuarios conectados y sus estados.</p>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="history" className="mt-4 space-y-4">
+              <Card className="p-4">
+                <h3 className="text-sm font-semibold mb-2">Historial de Sesiones</h3>
+                {history.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Sin historial registrado.</p>
+                ) : (
+                  <ul className="divide-y divide-border text-xs max-h-60 overflow-y-auto">
+                    {history.slice(0, 30).map((h) => (
+                      <li key={h.id} className="py-2 flex justify-between">
+                        <span className="font-medium">{h.user_name}</span>
+                        <span className="text-muted-foreground">{h.total_minutes ?? 0} min · {new Date(h.start_time).toLocaleDateString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="past" className="mt-4 space-y-4">
               <PastRankingsManager />
             </TabsContent>
 
-            <TabsContent value="diag" className="mt-4 space-y-3">
-              <Card className="p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">Diagnóstico y Chequeos Globales</h3>
-                  <Button
-                    size="sm"
-                    onClick={() => {}}
-                  >
-                    Ejecutar Chequeo Ahora
-                  </Button>
-                </div>
-                <div className="bg-black text-green-400 font-mono text-[11px] p-3 rounded h-48 overflow-y-auto space-y-1">
-                  {diagLogs.length === 0 ? (
-                    <div>[Sistema] Esperando ejecución o eventos automáticos...</div>
-                  ) : (
-                    diagLogs.map((l, idx) => <div key={idx}>{l}</div>)
-                  )}
-                </div>
+            <TabsContent value="diag" className="mt-4 space-y-4">
+              <Card className="p-4 space-y-2">
+                <h3 className="text-sm font-semibold">Diagnóstico del Sistema</h3>
+                <p className="text-xs text-muted-foreground">Monitoreo de estado de conexiones y red Supabase.</p>
               </Card>
             </TabsContent>
           </Tabs>
