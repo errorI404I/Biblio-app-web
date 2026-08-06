@@ -348,8 +348,8 @@ function Index() {
       for (const inv of inventoryData) {
         if (inv.item_id === 'badge_legend') {
           userBadgeMap.set(inv.user_name, '🏆 Estudiante Legendario');
-        } else if (inv.item_id === 'multiplicador_24h') {
-          userBadgeMap.set(inv.user_name, '⚡ Enfoque Extremo');
+        } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
+          userBadgeMap.set(inv.user_name, '⚡ Enfoque Extremo (x2)');
         } else if (inv.item_id === 'cafe_biblio') {
           userBadgeMap.set(inv.user_name, '☕ Amante del Café');
         } else if (inv.item_id === 'ruleta_extra') {
@@ -983,7 +983,7 @@ function Index() {
                               </div>
 
                               {l.badge && (
-                                <span className="text-[10px] text-muted-foreground tracking-wide font-medium mt-0.5">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30 mt-0.5 animate-pulse w-fit">
                                   {l.badge}
                                 </span>
                               )}
