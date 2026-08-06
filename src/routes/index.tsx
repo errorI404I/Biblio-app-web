@@ -198,7 +198,7 @@ function Index() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [leaders, setLeaders] = useState<{ user_name: string; minutes: number; online: boolean; streak: number }[]>([]);
+  const [leaders, setLeaders] = useState<{ user_name: string; minutes: number; online: boolean; streak: number; badge: string | null }[]>([]);
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [lastVerified, setLastVerified] = useState<number | null>(null);
   const [verifiedFlash, setVerifiedFlash] = useState(false);
@@ -272,15 +272,18 @@ function Index() {
   const systemOpen = isWithinOpenHours(new Date(now));
 
   const loadLeaders = useCallback(async () => {
-    const { data } = await supabase
-      .from('sesiones')
-      .select("user_name,total_minutes,end_time,start_time");
-    if (!data) return;
+    const [{ data: sessionsData }, { data: inventoryData }] = await Promise.all([
+      supabase.from('sesiones').select("user_name,total_minutes,end_time,start_time"),
+      supabase.from('user_inventory').select("user_name,item_id,is_active")
+    ]);
+
+    if (!sessionsData) return;
+
     const minutesMap = new Map<string, number>();
     const onlineSet = new Set<string>();
     const userSessionsMap = new Map<string, { start_time?: string | null }[]>();
 
-    for (const r of data) {
+    for (const r of sessionsData) {
       if (r.total_minutes != null) {
         minutesMap.set(r.user_name, (minutesMap.get(r.user_name) ?? 0) + (r.total_minutes ?? 0));
       }
@@ -290,15 +293,34 @@ function Index() {
       userList.push({ start_time: r.start_time });
       userSessionsMap.set(r.user_name, userList);
     }
+
+    // Mapear insignias o frases cosméticas basadas en inventario (ej: badge_legend o activas)
+    const userBadgeMap = new Map<string, string>();
+    if (inventoryData) {
+      for (const inv of inventoryData) {
+        if (inv.item_id === 'badge_legend') {
+          userBadgeMap.set(inv.user_name, '🏷️ Estudiante Legendario');
+        } else if (inv.item_id === 'cafe_biblio') {
+          userBadgeMap.set(inv.user_name, '☕ Amante del Café');
+        } else if (inv.item_id === 'multiplicador_24h') {
+          userBadgeMap.set(inv.user_name, '⚡ Enfoque Extremo');
+        } else if (inv.item_id === 'ruleta_extra') {
+          userBadgeMap.set(inv.user_name, '🎲 Suertudo');
+        }
+      }
+    }
+
     const names = new Set<string>([...minutesMap.keys(), ...onlineSet]);
     const arr = Array.from(names, (user_name) => {
       const userSessions = userSessionsMap.get(user_name) ?? [];
       const streak = calculateStreak(userSessions);
+      const badge = userBadgeMap.get(user_name) ?? null;
       return {
         user_name,
         minutes: minutesMap.get(user_name) ?? 0,
         online: onlineSet.has(user_name),
         streak,
+        badge,
       };
     }).sort((a, b) => b.minutes - a.minutes);
     setLeaders(arr);
@@ -885,26 +907,40 @@ function Index() {
                             >
                               {i + 1}
                             </span>
-                            <span className="font-medium">{l.user_name}</span>
+                            
+                            {/* Contenedor del nombre, insignia y estado sin modificar el tamaño del cuadro */}
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{l.user_name}</span>
 
-                            {l.streak > 0 && (
-                              <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                                🔥 {l.streak} {l.streak === 1 ? "día" : "días"}
-                              </span>
-                            )}
+                                {l.streak > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.2 rounded-full">
+                                    🔥 {l.streak} {l.streak === 1 ? "día" : "días"}
+                                  </span>
+                                )}
 
-                            {l.online ? (
-                              <span className="relative flex h-3 w-3" title="Conectado ahora">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                                <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.9)]" />
-                              </span>
-                            ) : (
-                              <span
-                                className="h-3 w-3 rounded-full bg-muted-foreground/40"
-                                title="Desconectado"
-                              />
-                            )}
+                                {l.online ? (
+                                  <span className="relative flex h-3 w-3" title="Conectado ahora">
+                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                                    <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.9)]" />
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="h-3 w-3 rounded-full bg-muted-foreground/40"
+                                    title="Desconectado"
+                                  />
+                                )}
+                              </div>
+
+                              {/* Insignia / frase cosmética comprada en la tienda debajo del nombre, bien pequeña */}
+                              {l.badge && (
+                                <span className="text-[10px] text-muted-foreground tracking-wide font-medium mt-0.5">
+                                  {l.badge}
+                                </span>
+                              )}
+                            </div>
                           </div>
+
                           <span className="font-mono tabular-nums text-sm">
                             {h}h {String(m).padStart(2, "0")}m
                           </span>
