@@ -248,8 +248,8 @@ function Index() {
       minutes: number;
       online: boolean;
       streak: number;
-      permanentBadge: string | null;
-      otherBadges: string[];
+      mainBadge: string | null;
+      temporalBadges: string[];
     }[]
   >([]);
   const [onlyOnline, setOnlyOnline] = useState(false);
@@ -379,7 +379,7 @@ function Index() {
 
           if (inv.item_id === 'badge_legend') {
             label = '🏆 Estudiante Legendario';
-            isMain = true; // Este es el emblema eterno principal que va a la extrema izquierda
+            isMain = true; // Emblema eterno principal a la extrema izquierda
           } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
             label = '⚡ Enfoque Extremo (x2)';
           } else if (inv.item_id === 'cafe_biblio') {
@@ -415,7 +415,7 @@ function Index() {
     }).sort((a, b) => b.minutes - a.minutes);
     setLeaders(arr);
   }, []);
-  
+
   const checkActiveSession = useCallback(async (name: string) => {
     if (!name) return;
     const { data: openRows } = await supabase
@@ -1024,16 +1024,18 @@ function Index() {
                                 )}
                               </div>
 
-                              {(l.permanentBadge || l.otherBadges.length > 0) && (
-                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                  {l.permanentBadge && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30 animate-pulse">
-                                      {l.permanentBadge}
+                              {(l.mainBadge || l.temporalBadges.length > 0) && (
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                  {/* Emblema Principal / Eterno a la extrema izquierda con diseño dorado destacado */}
+                                  {l.mainBadge && (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black text-yellow-300 bg-yellow-500/20 px-2.5 py-0.5 rounded-full border border-yellow-400/50 shadow-[0_0_10px_rgba(234,179,8,0.3)] animate-pulse">
+                                      {l.mainBadge}
                                     </span>
                                   )}
                                   
-                                  {l.otherBadges.map((badgeText, idx) => (
-                                    <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-400 bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">
+                                  {/* Ítems temporales / otros a la derecha */}
+                                  {l.temporalBadges.map((badgeText, idx) => (
+                                    <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-300 bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">
                                       {badgeText}
                                     </span>
                                   ))}
