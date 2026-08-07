@@ -82,6 +82,11 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [newItemDesc, setNewItemDesc] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
 
+  // Gestión de Usuarios
+  const [allUsers, setAllUsers] = useState<string[]>([]);
+  const [editingUserOld, setEditingUserOld] = useState<string | null>(null);
+  const [editingUserNew, setEditingUserNew] = useState("");
+
   // Restaurar Backup Excel
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -102,13 +107,14 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }, [authed]);
 
   const loadAll = async () => {
-    const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }] = await Promise.all([
+    const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }, { data: usersData }] = await Promise.all([
       supabase.from('sesiones').select("*").is("end_time", null).order("start_time", { ascending: false }),
       supabase.from('sesiones').select("*").not("end_time", "is", null).order("start_time", { ascending: false }).limit(100),
       supabase.from("settings").select("*").eq("key", "multiplier").maybeSingle(),
       (supabase as any).from("broadcasts").select("*").order("created_at", { ascending: false }).limit(20),
       supabase.from("app_config").select("*"),
       supabase.from("shop_items").select("*"),
+      supabase.from('sesiones').select("user_name"),
     ]);
     setActive((act ?? []) as Session[]);
     setHistory((hist ?? []) as Session[]);
@@ -132,6 +138,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       if (cth) setCoinsToHoursRate(Number(cth.value));
     }
     if (items) setShopItems(items as ShopItem[]);
+    if (usersData) {
+      const uniqueNames = Array.from(new Set(usersData.map((u: any) => u.user_name))).filter(Boolean) as string[];
+      setAllUsers(uniqueNames.sort());
+    }
   };
 
   useEffect(() => {
@@ -145,6 +155,53 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const tryAuth = () => {
     if (pass === ADMIN_PASS) setAuthed(true);
     else toast.error("Clave incorrecta");
+  };
+
+  // Funciones para Gestión de Usuarios
+  const handleRenameUser = async (oldName: string) => {
+    const newName = editingUserNew.trim();
+    if (!newName) {
+      toast.error("El nuevo nombre no puede estar vacío");
+      return;
+    }
+    if (newName === oldName) {
+      setEditingUserOld(null);
+      return;
+    }
+
+    try {
+      // Actualizar en sesiones
+      await supabase.from('sesiones').update({ user_name: newName }).eq('user_name', oldName);
+      // Actualizar en wallet
+      await supabase.from('user_wallet').update({ user_name: newName }).eq('user_name', oldName);
+      // Actualizar en inventario
+      await supabase.from('user_inventory').update({ user_name: newName }).eq('user_name', oldName);
+      // Actualizar en notificaciones
+      await supabase.from('notifications').update({ user_name: newName }).eq('user_name', oldName);
+
+      toast.success(`Usuario renombrado de "${oldName}" a "${newName}"`);
+      setEditingUserOld(null);
+      setEditingUserNew("");
+      loadAll();
+    } catch (e: any) {
+      toast.error("Error al renombrar usuario: " + (e?.message ?? "desconocido"));
+    }
+  };
+
+  const handleDeleteUser = async (userName: string) => {
+    if (!confirm(`¿Estás seguro de eliminar a "${userName}" y TODOS sus registros (sesiones, inventario, wallet)?`)) return;
+
+    try {
+      await supabase.from('sesiones').delete().eq('user_name', userName);
+      await supabase.from('user_wallet').delete().eq('user_name', userName);
+      await supabase.from('user_inventory').delete().eq('user_name', userName);
+      await supabase.from('notifications').delete().eq('user_name', userName);
+
+      toast.success(`Usuario "${userName}" eliminado correctamente.`);
+      loadAll();
+    } catch (e: any) {
+      toast.error("Error al eliminar usuario: " + (e?.message ?? "desconocido"));
+    }
   };
 
   const handleRestoreBackup = async () => {
@@ -248,7 +305,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     loadAll();
   };
 
-  // Función para actualizar precio de un ítem existente en la tienda
   const updateShopItemPrice = async (id: string, newPrice: string) => {
     const priceNum = parseFloat(newPrice);
     if (isNaN(priceNum) || priceNum < 0) return toast.error("Precio inválido");
@@ -774,7 +830,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                 <Button onClick={saveEconomyRates} size="sm">Guardar Tasas</Button>
               </Card>
 
-              {/* SECCIÓN NUEVA: GESTIÓN Y CAMBIO DE PRECIOS DE ÍTEMS */}
               <Card className="p-4 space-y-4">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
                   <ShoppingBag className="h-4 w-4" /> Gestión y Precios de Ítems
@@ -818,7 +873,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                             <div className="text-xs text-muted-foreground truncate">{item.description || "Sin descripción"}</div>
                           </div>
                           
-                          {/* Modificar precio de forma rápida inline */}
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground">🪙</span>
                             <Input
@@ -870,9 +924,68 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
             </TabsContent>
 
             <TabsContent value="users" className="mt-4 space-y-4">
-              <Card className="p-4">
-                <h3 className="text-sm font-semibold mb-2">Gestión de Usuarios Activos</h3>
-                <p className="text-xs text-muted-foreground">Panel de control general de usuarios conectados y sus estados.</p>
+              <Card className="p-4 space-y-4">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" /> Gestión de Usuarios ({allUsers.length})
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Aquí puedes cambiar el nombre de un usuario (se actualizará en todo el sistema) o eliminarlo por completo.
+                </p>
+
+                {allUsers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay usuarios registrados.</p>
+                ) : (
+                  <ul className="divide-y divide-border max-h-72 overflow-y-auto space-y-2 pr-1">
+                    {allUsers.map((userName) => (
+                      <li key={userName} className="flex items-center justify-between gap-2 pt-2 text-sm">
+                        <div className="min-w-0 flex-1 flex items-center gap-2">
+                          {editingUserOld === userName ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <Input
+                                defaultValue={userName}
+                                onChange={(e) => setEditingUserNew(e.target.value)}
+                                className="h-8 text-xs"
+                                autoFocus
+                              />
+                              <Button size="sm" onClick={() => handleRenameUser(userName)} className="h-8 px-2 text-xs">
+                                <Save className="h-3 w-3 mr-1" /> Guardar
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setEditingUserOld(null)} className="h-8 px-2 text-xs">
+                                Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="font-medium truncate">{userName}</span>
+                          )}
+                        </div>
+
+                        {editingUserOld !== userName && (
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingUserOld(userName);
+                                setEditingUserNew(userName);
+                              }}
+                              className="h-7 px-2 text-xs"
+                            >
+                              <Pencil className="h-3 w-3 mr-1" /> Editar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleDeleteUser(userName)}
+                              className="h-7 px-2 text-xs"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Card>
             </TabsContent>
 

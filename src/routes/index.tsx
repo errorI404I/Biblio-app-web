@@ -242,7 +242,16 @@ function Index() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [leaders, setLeaders] = useState<{ user_name: string; minutes: number; online: boolean; streak: number; badge: string | null }[]>([]);
+  const [leaders, setLeaders] = useState<
+    {
+      user_name: string;
+      minutes: number;
+      online: boolean;
+      streak: number;
+      permanentBadge: string | null;
+      otherBadges: string[];
+    }[]
+  >([]);
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [lastVerified, setLastVerified] = useState<number | null>(null);
   const [verifiedFlash, setVerifiedFlash] = useState(false);
@@ -324,7 +333,7 @@ function Index() {
   const loadLeaders = useCallback(async () => {
     const [{ data: sessionsData }, { data: inventoryData }] = await Promise.all([
       supabase.from('sesiones').select("user_name,total_minutes,end_time,start_time"),
-      supabase.from('user_inventory').select("user_name,item_id,is_active")
+      supabase.from('user_inventory').select("user_name,item_id,is_active,expires_at")
     ]);
     if (!sessionsData) return;
     
@@ -343,18 +352,51 @@ function Index() {
       userSessionsMap.set(r.user_name, userList);
     }
 
-    const userBadgeMap = new Map<string, string>();
+    const userBadgesMap = new Map<string, { permanentBadge: string | null; otherBadges: string[] }>();
+    const singleUseItems = new Set(['ruleta_extra']);
+
     if (inventoryData) {
+      const userItemsMap = new Map<string, { item_id: string; is_active: boolean | null; expires_at?: string | null }[]>();
+      
       for (const inv of inventoryData) {
-        if (inv.item_id === 'badge_legend') {
-          userBadgeMap.set(inv.user_name, '🏆 Estudiante Legendario');
-        } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
-          userBadgeMap.set(inv.user_name, '⚡ Enfoque Extremo (x2)');
-        } else if (inv.item_id === 'cafe_biblio') {
-          userBadgeMap.set(inv.user_name, '☕ Amante del Café');
-        } else if (inv.item_id === 'ruleta_extra') {
-          userBadgeMap.set(inv.user_name, '🎲 Suertudo');
+        if (singleUseItems.has(inv.item_id)) continue;
+        if (inv.expires_at && new Date(inv.expires_at).getTime() <= Date.now()) {
+          continue; 
         }
+        
+        const list = userItemsMap.get(inv.user_name) ?? [];
+        list.push(inv);
+        userItemsMap.set(inv.user_name, list);
+      }
+
+      for (const [userNameKey, items] of userItemsMap.entries()) {
+        let permanentBadge: string | null = null;
+        const otherBadges: string[] = [];
+
+        for (const inv of items) {
+          let label = '';
+          let isPermanent = false;
+
+          if (inv.item_id === 'badge_legend') {
+            label = '🏆 Estudiante Legendario';
+            isPermanent = true;
+          } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
+            label = '⚡ Enfoque Extremo (x2)';
+          } else if (inv.item_id === 'cafe_biblio') {
+            label = '☕ Amante del Café';
+            isPermanent = true;
+          }
+
+          if (!label) continue;
+
+          if (isPermanent && !permanentBadge) {
+            permanentBadge = label;
+          } else {
+            otherBadges.push(label);
+          }
+        }
+
+        userBadgesMap.set(userNameKey, { permanentBadge, otherBadges });
       }
     }
 
@@ -362,13 +404,14 @@ function Index() {
     const arr = Array.from(names, (user_name) => {
       const userSessions = userSessionsMap.get(user_name) ?? [];
       const streak = calculateStreak(userSessions);
-      const badge = userBadgeMap.get(user_name) ?? null;
+      const badges = userBadgesMap.get(user_name) ?? { permanentBadge: null, otherBadges: [] };
       return {
         user_name,
         minutes: minutesMap.get(user_name) ?? 0,
         online: onlineSet.has(user_name),
         streak,
-        badge,
+        permanentBadge: badges.permanentBadge,
+        otherBadges: badges.otherBadges,
       };
     }).sort((a, b) => b.minutes - a.minutes);
     setLeaders(arr);
@@ -959,7 +1002,7 @@ function Index() {
                               {i + 1}
                             </span>
                             
-                            <div className="flex flex-col">
+                            <div className="flex flex-col gap-1">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{l.user_name}</span>
 
@@ -982,10 +1025,20 @@ function Index() {
                                 )}
                               </div>
 
-                              {l.badge && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30 mt-0.5 animate-pulse w-fit">
-                                  {l.badge}
-                                </span>
+                              {(l.permanentBadge || l.otherBadges.length > 0) && (
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  {l.permanentBadge && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30 animate-pulse">
+                                      {l.permanentBadge}
+                                    </span>
+                                  )}
+                                  
+                                  {l.otherBadges.map((badgeText, idx) => (
+                                    <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-400 bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">
+                                      {badgeText}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           </div>
