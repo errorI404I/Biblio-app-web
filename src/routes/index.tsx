@@ -352,7 +352,7 @@ function Index() {
       userSessionsMap.set(r.user_name, userList);
     }
 
-    const userBadgesMap = new Map<string, { permanentBadge: string | null; otherBadges: string[] }>();
+    const userBadgesMap = new Map<string, { mainBadge: string | null; temporalBadges: string[] }>();
     const singleUseItems = new Set(['ruleta_extra']);
 
     if (inventoryData) {
@@ -370,33 +370,32 @@ function Index() {
       }
 
       for (const [userNameKey, items] of userItemsMap.entries()) {
-        let permanentBadge: string | null = null;
-        const otherBadges: string[] = [];
+        let mainBadge: string | null = null;
+        const temporalBadges: string[] = [];
 
         for (const inv of items) {
           let label = '';
-          let isPermanent = false;
+          let isMain = false;
 
           if (inv.item_id === 'badge_legend') {
             label = '🏆 Estudiante Legendario';
-            isPermanent = true;
+            isMain = true; // Este es el emblema eterno principal que va a la extrema izquierda
           } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
             label = '⚡ Enfoque Extremo (x2)';
           } else if (inv.item_id === 'cafe_biblio') {
             label = '☕ Amante del Café';
-            isPermanent = true;
           }
 
           if (!label) continue;
 
-          if (isPermanent && !permanentBadge) {
-            permanentBadge = label;
+          if (isMain) {
+            mainBadge = label;
           } else {
-            otherBadges.push(label);
+            temporalBadges.push(label);
           }
         }
 
-        userBadgesMap.set(userNameKey, { permanentBadge, otherBadges });
+        userBadgesMap.set(userNameKey, { mainBadge, temporalBadges });
       }
     }
 
@@ -404,19 +403,19 @@ function Index() {
     const arr = Array.from(names, (user_name) => {
       const userSessions = userSessionsMap.get(user_name) ?? [];
       const streak = calculateStreak(userSessions);
-      const badges = userBadgesMap.get(user_name) ?? { permanentBadge: null, otherBadges: [] };
+      const badges = userBadgesMap.get(user_name) ?? { mainBadge: null, temporalBadges: [] };
       return {
         user_name,
         minutes: minutesMap.get(user_name) ?? 0,
         online: onlineSet.has(user_name),
         streak,
-        permanentBadge: badges.permanentBadge,
-        otherBadges: badges.otherBadges,
+        mainBadge: badges.mainBadge,
+        temporalBadges: badges.temporalBadges,
       };
     }).sort((a, b) => b.minutes - a.minutes);
     setLeaders(arr);
   }, []);
-
+  
   const checkActiveSession = useCallback(async (name: string) => {
     if (!name) return;
     const { data: openRows } = await supabase
