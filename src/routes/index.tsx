@@ -260,6 +260,51 @@ function Index() {
   const [insult, setInsult] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Estados para el Screamer en la Web
+  const [screamerActive, setScreamerActive] = useState(false);
+  const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
+
+  // Función para comprobar y disparar el Screamer web al hacer Check-in
+  const checkAndTriggerScreamerWeb = async (name: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('pending_punishments')
+        .select('*')
+        .eq('target_user', name)
+        .eq('triggered', false)
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return;
+
+      // Desactivar de inmediato en la base de datos
+      await supabase
+        .from('pending_punishments')
+        .update({ triggered: true })
+        .eq('id', data.id);
+
+      // Probabilidad de sorpresa: 1 de cada 100 (1%)
+      const isSurprise = Math.random() < 0.01;
+      let selectedImage = '';
+
+      if (isSurprise) {
+        selectedImage = 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5';
+      } else {
+        const normalPhotos = [
+          'https://images.unsplash.com/photo-1518709268805-4e9042af9f23',
+          'https://images.unsplash.com/photo-1508739773434-c26b3d09e071',
+          'https://images.unsplash.com/photo-1534447677768-be436bb09401',
+        ];
+        selectedImage = normalPhotos[Math.floor(Math.random() * normalPhotos.length)];
+      }
+
+      setScreamerData({ image: selectedImage, isSurprise });
+      setScreamerActive(true);
+    } catch (err) {
+      console.error('Error al comprobar sustos pendientes en web:', err);
+    }
+  };
+
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -379,7 +424,7 @@ function Index() {
 
           if (inv.item_id === 'badge_legend') {
             label = '🏆 Estudiante Legendario';
-            isMain = true; // Emblema eterno principal a la extrema izquierda
+            isMain = true; 
           } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
             label = '⚡ Enfoque Extremo (x2)';
           } else if (inv.item_id === 'cafe_biblio') {
@@ -554,6 +599,10 @@ function Index() {
     }
     setActiveSession(data);
     setLastVerified(Date.now());
+    
+    // 👻 AQUÍ: Comprobar y disparar el screamer al hacer check-in en la web
+    await checkAndTriggerScreamerWeb(name);
+
     toast.success(`Check-in registrado, ${name}`);
   };
 
@@ -718,6 +767,31 @@ function Index() {
       <Toaster theme="dark" position="top-center" />
       <AdminPanel open={adminOpen} onOpenChange={setAdminOpen} />
       <BroadcastImageModal />
+
+      {/* MODAL WEB DEL SCREAMER */}
+      {screamerActive && screamerData && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 p-6 animate-in fade-in">
+          <div className="max-w-xl w-full flex flex-col items-center text-center">
+            <img 
+              src={screamerData.image} 
+              alt="Susto" 
+              className="max-h-[60vh] w-full rounded-2xl object-cover border-4 border-red-600 shadow-[0_0_30px_rgba(220,38,38,0.7)] mb-6"
+            />
+            <h2 className="text-2xl sm:text-4xl font-black uppercase tracking-tight text-red-500 mb-6 animate-pulse">
+              {screamerData.isSurprise ? '😱 ¡¡SORPRESA TERRORÍFICA (1 en 100)!! 😱' : '👻 ¡Te han enviado un susto en el check-in! 👻'}
+            </h2>
+            <Button
+              variant="destructive"
+              size="lg"
+              className="bg-red-600 hover:bg-red-700 font-black px-8 py-4 text-lg"
+              onClick={() => setScreamerActive(false)}
+            >
+              ¡Superar trauma y continuar!
+            </Button>
+          </div>
+        </div>
+      )}
+
       {insult && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6 animate-in fade-in"
@@ -1026,14 +1100,12 @@ function Index() {
 
                               {(l.mainBadge || l.temporalBadges.length > 0) && (
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                  {/* Emblema Principal / Eterno a la extrema izquierda con diseño dorado destacado */}
                                   {l.mainBadge && (
                                     <span className="inline-flex items-center gap-1 text-[11px] font-black text-yellow-300 bg-yellow-500/20 px-2.5 py-0.5 rounded-full border border-yellow-400/50 shadow-[0_0_10px_rgba(234,179,8,0.3)] animate-pulse">
                                       {l.mainBadge}
                                     </span>
                                   )}
                                   
-                                  {/* Ítems temporales / otros a la derecha */}
                                   {l.temporalBadges.map((badgeText, idx) => (
                                     <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-300 bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">
                                       {badgeText}
