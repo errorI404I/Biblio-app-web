@@ -7,6 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Wifi, WifiOff, LogIn, LogOut, Trophy, Loader2, Sparkles, Archive } from "lucide-react";
 import { PastRankingsPublic } from "@/components/PastRankings";
+import React, { useEffect, useState } from 'react';
+import ReactPlayer from 'react-player';
+import { supabase } from '@/integrations/supabase/client';
 
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -191,6 +194,62 @@ async function massCloseAt(endIso: string) {
     if (!error) count++;
   }
   return count;
+}
+export function WebMusicPlayer() {
+  const [songUrl, setSongUrl] = useState('');
+  const [volume, setVolume] = useState(1);
+
+  // Cargar estado inicial y escuchar cambios en tiempo real
+  useEffect(() => {
+    const fetchState = async () => {
+      const { data } = await supabase.from('player_state').select('*').eq('id', 1).single();
+      if (data) {
+        setSongUrl(data.current_song);
+        setVolume(data.volume);
+      }
+    };
+    fetchState();
+
+    // Canal de Supabase Realtime para la web
+    const channel = supabase
+      .channel('public:player_state')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'player_state' }, (payload) => {
+        setSongUrl(payload.new.current_song);
+        setVolume(payload.new.volume);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const handleVolumeChange = async (newVol: number) => {
+    setVolume(newVol);
+    await supabase.from('player_state').update({ volume: newVol }).eq('id', 1);
+  };
+
+  return (
+    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700">
+      <h3 className="text-white font-bold mb-2">🎵 Reproductor Biblio</h3>
+      {/* Reproductor oculto o visualizador de audio */}
+      <div className="hidden">
+        <ReactPlayer url={songUrl} volume={volume} playing controls width="0" height="0" />
+      </div>
+      <p className="text-xs text-slate-400 mb-2">Reproduciendo en directo</p>
+      <div className="flex items-center gap-2">
+        <span className="text-white text-sm">Volumen:</span>
+        <input 
+          type="range" 
+          min="0" 
+          max="1" 
+          step="0.05" 
+          value={volume} 
+          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+        />
+      </div>
+    </div>
+  );
 }
 
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
