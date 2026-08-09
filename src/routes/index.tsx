@@ -197,17 +197,20 @@ async function massCloseAt(endIso: string) {
 // --- LÓGICA DE CONVERSIÓN DE AUDIO DESDE LA WEB (HOST) ---
 async function getDirectAudioUrlFromName(songName: string): Promise<string | null> {
   try {
-    // Usamos un proxy público de CORS para evitar que el navegador bloquee la petición
-    const corsProxy = "https://corsproxy.io/?";
+    // 1. Buscar el video usando un proxy JSON directo (allorigins)
     const targetUrl = `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(songName)}&filter=videos`;
+    const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`);
+    const proxyData = await proxyRes.json();
     
-    const searchRes = await fetch(corsProxy + encodeURIComponent(targetUrl));
-    const searchData = await searchRes.json();
+    if (!proxyData.contents) return null;
+    const searchData = JSON.parse(proxyData.contents);
+    
     if (!searchData?.items?.length) return null;
 
     const videoId = searchData.items[0].url.split('/watch?v=')[1];
     const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
+    // 2. Enviar a Cobalt para obtener el MP3
     const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
       method: 'POST',
       headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
@@ -217,7 +220,7 @@ async function getDirectAudioUrlFromName(songName: string): Promise<string | nul
     const cobaltData = await cobaltRes.json();
     return cobaltData.url || cobaltData.picker?.[0]?.url || null;
   } catch (error) {
-    console.error("Error convirtiendo audio con proxy:", error);
+    console.error("Error convirtiendo audio con AllOrigins:", error);
     return null;
   }
 }
