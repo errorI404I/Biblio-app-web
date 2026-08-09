@@ -7,9 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Wifi, WifiOff, LogIn, LogOut, Trophy, Loader2, Sparkles, Archive } from "lucide-react";
 import { PastRankingsPublic } from "@/components/PastRankings";
-import React, { useEffect, useState } from 'react';
 import ReactPlayer from 'react-player';
-import { supabase } from '@/integrations/supabase/client';
 
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -195,27 +193,54 @@ async function massCloseAt(endIso: string) {
   }
   return count;
 }
-export function WebMusicPlayer() {
-  const [songUrl, setSongUrl] = useState('');
-  const [volume, setVolume] = useState(1);
 
-  // Cargar estado inicial y escuchar cambios en tiempo real
+// --- LÓGICA DE CONVERSIÓN DE AUDIO DESDE LA WEB (HOST) ---
+async function getDirectAudioUrlFromName(songName: string): Promise<string | null> {
+  try {
+    const searchRes = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(songName)}&filter=videos`);
+    const searchData = await searchRes.json();
+    if (!searchData?.items?.length) return null;
+
+    const videoId = searchData.items[0].url.split('/watch?v=')[1];
+    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+    const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: youtubeUrl, downloadMode: 'audio', audioFormat: 'mp3' }),
+    });
+
+    const cobaltData = await cobaltRes.json();
+    return cobaltData.url || cobaltData.picker?.[0]?.url || null;
+  } catch (error) {
+    console.error("Error convirtiendo audio en la web:", error);
+    return null;
+  }
+}
+
+export function WebMusicPlayer() {
+  const [songUrl, setSongUrl] = useState('https://stream.zeno.fm/f3wvbbqmdg8uv');
+  const [songTitle, setSongTitle] = useState('Lofi Girl - Beats to relax/study to');
+  const [volume, setVolume] = useState(1);
+  const [isPlayingQueue, setIsPlayingQueue] = useState(false);
+
+  // Cargar estado inicial del reproductor
   useEffect(() => {
     const fetchState = async () => {
-      const { data } = await supabase.from('player_state').select('*').eq('id', 1).single();
+      const { data } = await supabase.from('player_state').select('*').eq('id', 1).maybeSingle();
       if (data) {
-        setSongUrl(data.current_song);
-        setVolume(data.volume);
+        if (data.current_song) setSongUrl(data.current_song);
+        if (data.song_title) setSongTitle(data.song_title);
+        if (data.volume !== undefined) setVolume(data.volume);
       }
     };
     fetchState();
 
-    // Canal de Supabase Realtime para la web
+    // Canal en tiempo real para sincronizar volumen u otros estados
     const channel = supabase
-      .channel('public:player_state')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'player_state' }, (payload) => {
-        setSongUrl(payload.new.current_song);
-        setVolume(payload.new.volume);
+      .channel('public:player_state_web')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'player_state', filter: 'id=eq.1' }, (payload) => {
+        if (payload.new.volume !== undefined) setVolume(payload.new.volume);
       })
       .subscribe();
 
@@ -224,19 +249,73 @@ export function WebMusicPlayer() {
     };
   }, []);
 
+  // Loop principal (Host): Revisa la cola de canciones cada 10 segundos
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (isPlayingQueue) return; // Si ya está procesando una canción, espera
+
+      const { data: queue, error } = await supabase
+        .from('song_queue')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      if (error || !queue || queue.length === 0) {
+        // Si la cola está vacía, mantener Lofi Girl por defecto
+        const lofiUrl = 'https://stream.zeno.fm/f3wvbbqmdg8uv';
+        if (songUrl !== lofiUrl) {
+          setSongUrl(lofiUrl);
+          setSongTitle('Lofi Girl - Beats to relax/study to');
+          await supabase.from('player_state').update({
+            current_song: lofiUrl,
+            song_title: 'Lofi Girl - Beats to relax/study to'
+          }).eq('id', 1);
+        }
+        return;
+      }
+
+      // Procesar la canción en la cola
+      setIsPlayingQueue(true);
+      const currentItem = queue[0];
+      console.log("Procesando canción de la cola en la web:", currentItem.song_name);
+
+      const mp3Url = await getDirectAudioUrlFromName(currentItem.song_name);
+
+      if (mp3Url) {
+        setSongUrl(mp3Url);
+        setSongTitle(currentItem.song_name);
+
+        // Actualizar player_state para que las apps móviles lo reproduzcan en directo
+        await supabase.from('player_state').update({
+          current_song: mp3Url,
+          song_title: currentItem.song_name
+        }).eq('id', 1);
+      }
+
+      // Borrar la canción atendida de la cola
+      await supabase.from('song_queue').delete().eq('id', currentItem.id);
+      setIsPlayingQueue(false);
+
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [isPlayingQueue, songUrl]);
+
   const handleVolumeChange = async (newVol: number) => {
     setVolume(newVol);
     await supabase.from('player_state').update({ volume: newVol }).eq('id', 1);
   };
 
   return (
-    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700">
-      <h3 className="text-white font-bold mb-2">🎵 Reproductor Biblio</h3>
-      {/* Reproductor oculto o visualizador de audio */}
-      <div className="hidden">
-        <ReactPlayer url={songUrl} volume={volume} playing controls width="0" height="0" />
+    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700 mt-4">
+      <h3 className="text-white font-bold mb-1">🎵 Reproductor Biblio (Host Web)</h3>
+      <p className="text-xs text-amber-400 mb-3" style={{ wordBreak: 'break-all' }}>Sonando: {songTitle}</p>
+      
+      {/* Reproductor de audio real ejecutándose en la web */}
+      <div className="mb-3">
+        <ReactPlayer url={songUrl} volume={volume} playing controls width="100%" height="50px" />
       </div>
-      <p className="text-xs text-slate-400 mb-2">Reproduciendo en directo</p>
+
       <div className="flex items-center gap-2">
         <span className="text-white text-sm">Volumen:</span>
         <input 
@@ -246,15 +325,18 @@ export function WebMusicPlayer() {
           step="0.05" 
           value={volume} 
           onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+          className="w-full accent-primary cursor-pointer"
         />
       </div>
     </div>
   );
 }
 
+// --- LÓGICA DE RACHA CON EXENCIÓN DE FINES DE SEMANA ---
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
   if (!sessions || sessions.length === 0) return 0;
 
+  // Obtener fechas únicas ordenadas de más reciente a más antigua
   const uniqueDates = Array.from(
     new Set(
       sessions.map((s) => {
@@ -267,27 +349,79 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   if (uniqueDates.length === 0) return 0;
 
+  // Función auxiliar para saber si una fecha es sábado (6) o domingo (0)
+  const isWeekend = (dateStr: string) => {
+    const day = new Date(dateStr + "T00:00:00").getDay();
+    return day === 0 || day === 6;
+  };
+
+  // Función para restar un día a una fecha en formato YYYY-MM-DD
+  const getPreviousDayStr = (dateStr: string) => {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  };
+
   let streak = 0;
-  const today = new Date().toISOString().split("T")[0];
+  const todayStr = new Date().toISOString().split("T")[0];
   
   const yesterdayDate = new Date();
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = yesterdayDate.toISOString().split("T")[0];
+  const yesterdayStr = yesterdayDate.toISOString().split("T")[0];
 
-  const latestDate = uniqueDates[0];
-  if (latestDate !== today && latestDate !== yesterday) {
-    return 0;
+  let latestDate = uniqueDates[0];
+
+  // Si la última conexión no fue hoy ni ayer, validamos si el retraso se debió al fin de semana
+  if (latestDate !== todayStr && latestDate !== yesterdayStr) {
+    // Si hoy es lunes y la última vez fue el viernes, es válido
+    const todayObj = new Date(todayStr + "T00:00:00");
+    const latestObj = new Date(latestDate + "T00:00:00");
+    const diffTime = Math.abs(todayObj.getTime() - latestObj.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    // Si pasaron 3 días (ej. hoy lunes y último el viernes) y el intermedio fue fin de semana
+    let validWeekendGap = true;
+    let checkDate = todayStr;
+    for (let d = 0; d < diffDays - 1; d++) {
+      checkDate = getPreviousDayStr(checkDate);
+      if (!isWeekend(checkDate)) {
+        validWeekendGap = false;
+        break;
+      }
+    }
+
+    if (!validWeekendGap) return 0;
   }
 
-  let expectedDate = new Date(latestDate);
-  
+  // Recorrer y contar la racha hacia atrás saltando fines de semana
+  let expectedDateStr = latestDate;
   for (let i = 0; i < uniqueDates.length; i++) {
-    const expectedStr = expectedDate.toISOString().split("T")[0];
-    if (uniqueDates[i] === expectedStr) {
+    // Si la fecha actual de la lista coincide con la esperada
+    if (uniqueDates[i] === expectedDateStr) {
       streak++;
-      expectedDate.setDate(expectedDate.getDate() - 1);
+      expectedDateStr = getPreviousDayStr(expectedDateStr);
     } else {
-      break;
+      // Verificar si hay huecos de fin de semana permitidos
+      let found = false;
+      let tempDate = expectedDateStr;
+      
+      // Retroceder hasta 2 días buscando un fin de semana
+      for (let w = 0; w < 2; w++) {
+        tempDate = getPreviousDayStr(tempDate);
+        if (isWeekend(tempDate) && uniqueDates[i] === tempDate) {
+          streak++;
+          expectedDateStr = getPreviousDayStr(tempDate);
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        break;
+      } else {
+        // Reintentar evaluar el índice actual con la nueva fecha esperada
+        i--; 
+      }
     }
   }
 
@@ -659,7 +793,6 @@ function Index() {
     setActiveSession(data);
     setLastVerified(Date.now());
     
-    // 👻 AQUÍ: Comprobar y disparar el screamer al hacer check-in en la web
     await checkAndTriggerScreamerWeb(name);
 
     toast.success(`Check-in registrado, ${name}`);
@@ -976,6 +1109,9 @@ function Index() {
                 </p>
               )}
             </Card>
+
+            {/* REPRODUCTOR WEB INTEGRADO */}
+            <WebMusicPlayer />
 
             <Card
               className="p-6 text-center"
