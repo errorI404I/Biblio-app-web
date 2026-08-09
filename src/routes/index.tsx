@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Wifi, WifiOff, LogIn, LogOut, Trophy, Loader2, Sparkles, Archive } from "lucide-react";
 import { PastRankingsPublic } from "@/components/PastRankings";
-import ReactPlayer from 'react-player';
 
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -194,150 +193,6 @@ async function massCloseAt(endIso: string) {
   return count;
 }
 
-// --- LÓGICA DE CONVERSIÓN DE AUDIO DESDE LA WEB (HOST) ---
-async function getDirectAudioUrlFromName(songName: string): Promise<string | null> {
-  try {
-    // 1. Buscar el video usando un proxy JSON directo (allorigins)
-    const targetUrl = `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(songName)}&filter=videos`;
-    const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`);
-    const proxyData = await proxyRes.json();
-    
-    if (!proxyData.contents) return null;
-    const searchData = JSON.parse(proxyData.contents);
-    
-    if (!searchData?.items?.length) return null;
-
-    const videoId = searchData.items[0].url.split('/watch?v=')[1];
-    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-    // 2. Enviar a Cobalt para obtener el MP3
-    const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: youtubeUrl, downloadMode: 'audio', audioFormat: 'mp3' }),
-    });
-
-    const cobaltData = await cobaltRes.json();
-    return cobaltData.url || cobaltData.picker?.[0]?.url || null;
-  } catch (error) {
-    console.error("Error convirtiendo audio con AllOrigins:", error);
-    return null;
-  }
-}
-
-export function WebMusicPlayer() {
-  const [songUrl, setSongUrl] = useState('https://stream.zeno.fm/f3wvbbqmdg8uv');
-  const [songTitle, setSongTitle] = useState('Lofi Girl - Beats to relax/study to');
-  const [volume, setVolume] = useState(1);
-  const [isPlayingQueue, setIsPlayingQueue] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
-
-  // Cargar estado inicial del reproductor de forma segura
-  useEffect(() => {
-    const fetchState = async () => {
-      const { data, error } = await supabase.from('player_state').select('*').eq('id', 1).maybeSingle();
-      if (data) {
-        if (data.current_song) setSongUrl(data.current_song);
-        if (data.song_title) setSongTitle(data.song_title);
-        if (data.volume !== undefined) setVolume(data.volume);
-      } else if (error) {
-        console.error("Error al cargar player_state:", error);
-      }
-    };
-    fetchState();
-  }, []);
-
-  // Loop principal (Host): Revisa la cola de canciones cada 10 segundos
-  useEffect(() => {
-    if (!hasInteracted) return; // No procesar cola hasta que el usuario active el audio
-
-    const interval = setInterval(async () => {
-      if (isPlayingQueue) return;
-
-      const { data: queue, error } = await supabase
-        .from('song_queue')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .limit(1);
-
-      if (error || !queue || queue.length === 0) {
-        const lofiUrl = 'https://stream.zeno.fm/f3wvbbqmdg8uv';
-        if (songUrl !== lofiUrl) {
-          setSongUrl(lofiUrl);
-          setSongTitle('Lofi Girl - Beats to relax/study to');
-          await supabase.from('player_state').update({
-            current_song: lofiUrl,
-            song_title: 'Lofi Girl - Beats to relax/study to'
-          }).eq('id', 1);
-        }
-        return;
-      }
-
-      setIsPlayingQueue(true);
-      const currentItem = queue[0];
-      console.log("Procesando canción de la cola en la web:", currentItem.song_name);
-
-      const mp3Url = await getDirectAudioUrlFromName(currentItem.song_name);
-
-      if (mp3Url) {
-        setSongUrl(mp3Url);
-        setSongTitle(currentItem.song_name);
-
-        await supabase.from('player_state').update({
-          current_song: mp3Url,
-          song_title: currentItem.song_name
-        }).eq('id', 1);
-      }
-
-      await supabase.from('song_queue').delete().eq('id', currentItem.id);
-      setIsPlayingQueue(false);
-
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [isPlayingQueue, songUrl, hasInteracted]);
-
-  const handleVolumeChange = async (newVol: number) => {
-    setVolume(newVol);
-    await supabase.from('player_state').update({ volume: newVol }).eq('id', 1);
-  };
-
-  return (
-    <div className="p-4 bg-slate-900 rounded-xl border border-slate-700 mt-4">
-      <h3 className="text-white font-bold mb-1">🎵 Reproductor Biblio (Host Web)</h3>
-      <p className="text-xs text-amber-400 mb-3" style={{ wordBreak: 'break-all' }}>Sonando: {songTitle}</p>
-      
-      {!hasInteracted ? (
-        <div className="mb-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-center">
-          <p className="text-xs text-amber-300 mb-2">El navegador requiere una interacción para reproducir audio.</p>
-          <Button 
-            onClick={() => setHasInteracted(true)} 
-            className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold"
-          >
-            🔊 Activar Reproductor y Cola
-          </Button>
-        </div>
-      ) : (
-        <div className="mb-3">
-          <ReactPlayer url={songUrl} volume={volume} playing controls width="100%" height="50px" />
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        <span className="text-white text-sm">Volumen:</span>
-        <input 
-          type="range" 
-          min="0" 
-          max="1" 
-          step="0.05" 
-          value={volume} 
-          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-          className="w-full accent-primary cursor-pointer"
-        />
-      </div>
-    </div>
-  );
-}
 // --- LÓGICA DE RACHA CON EXENCIÓN DE FINES DE SEMANA ---
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
   if (!sessions || sessions.length === 0) return 0;
@@ -379,13 +234,11 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   // Si la última conexión no fue hoy ni ayer, validamos si el retraso se debió al fin de semana
   if (latestDate !== todayStr && latestDate !== yesterdayStr) {
-    // Si hoy es lunes y la última vez fue el viernes, es válido
     const todayObj = new Date(todayStr + "T00:00:00");
     const latestObj = new Date(latestDate + "T00:00:00");
     const diffTime = Math.abs(todayObj.getTime() - latestObj.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    // Si pasaron 3 días (ej. hoy lunes y último el viernes) y el intermedio fue fin de semana
     let validWeekendGap = true;
     let checkDate = todayStr;
     for (let d = 0; d < diffDays - 1; d++) {
@@ -402,16 +255,13 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
   // Recorrer y contar la racha hacia atrás saltando fines de semana
   let expectedDateStr = latestDate;
   for (let i = 0; i < uniqueDates.length; i++) {
-    // Si la fecha actual de la lista coincide con la esperada
     if (uniqueDates[i] === expectedDateStr) {
       streak++;
       expectedDateStr = getPreviousDayStr(expectedDateStr);
     } else {
-      // Verificar si hay huecos de fin de semana permitidos
       let found = false;
       let tempDate = expectedDateStr;
       
-      // Retroceder hasta 2 días buscando un fin de semana
       for (let w = 0; w < 2; w++) {
         tempDate = getPreviousDayStr(tempDate);
         if (isWeekend(tempDate) && uniqueDates[i] === tempDate) {
@@ -425,7 +275,6 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
       if (!found) {
         break;
       } else {
-        // Reintentar evaluar el índice actual con la nueva fecha esperada
         i--; 
       }
     }
@@ -476,13 +325,11 @@ function Index() {
 
       if (error || !data) return;
 
-      // Desactivar de inmediato en la base de datos
       await supabase
         .from('pending_punishments')
         .update({ triggered: true })
         .eq('id', data.id);
 
-      // Probabilidad de sorpresa: 1 de cada 100 (1%)
       const isSurprise = Math.random() < 0.01;
       let selectedImage = '';
 
@@ -1115,9 +962,6 @@ function Index() {
                 </p>
               )}
             </Card>
-
-            {/* REPRODUCTOR WEB INTEGRADO */}
-            <WebMusicPlayer />
 
             <Card
               className="p-6 text-center"
