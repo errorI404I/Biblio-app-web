@@ -197,7 +197,11 @@ async function massCloseAt(endIso: string) {
 // --- LÓGICA DE CONVERSIÓN DE AUDIO DESDE LA WEB (HOST) ---
 async function getDirectAudioUrlFromName(songName: string): Promise<string | null> {
   try {
-    const searchRes = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(songName)}&filter=videos`);
+    // Usamos un proxy público de CORS para evitar que el navegador bloquee la petición
+    const corsProxy = "https://corsproxy.io/?";
+    const targetUrl = `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(songName)}&filter=videos`;
+    
+    const searchRes = await fetch(corsProxy + encodeURIComponent(targetUrl));
     const searchData = await searchRes.json();
     if (!searchData?.items?.length) return null;
 
@@ -213,10 +217,11 @@ async function getDirectAudioUrlFromName(songName: string): Promise<string | nul
     const cobaltData = await cobaltRes.json();
     return cobaltData.url || cobaltData.picker?.[0]?.url || null;
   } catch (error) {
-    console.error("Error convirtiendo audio en la web:", error);
+    console.error("Error convirtiendo audio con proxy:", error);
     return null;
   }
 }
+
 export function WebMusicPlayer() {
   const [songUrl, setSongUrl] = useState('https://stream.zeno.fm/f3wvbbqmdg8uv');
   const [songTitle, setSongTitle] = useState('Lofi Girl - Beats to relax/study to');
