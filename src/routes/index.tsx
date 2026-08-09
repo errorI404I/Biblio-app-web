@@ -217,42 +217,34 @@ async function getDirectAudioUrlFromName(songName: string): Promise<string | nul
     return null;
   }
 }
-
 export function WebMusicPlayer() {
   const [songUrl, setSongUrl] = useState('https://stream.zeno.fm/f3wvbbqmdg8uv');
   const [songTitle, setSongTitle] = useState('Lofi Girl - Beats to relax/study to');
   const [volume, setVolume] = useState(1);
   const [isPlayingQueue, setIsPlayingQueue] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
-  // Cargar estado inicial del reproductor
+  // Cargar estado inicial del reproductor de forma segura
   useEffect(() => {
     const fetchState = async () => {
-      const { data } = await supabase.from('player_state').select('*').eq('id', 1).maybeSingle();
+      const { data, error } = await supabase.from('player_state').select('*').eq('id', 1).maybeSingle();
       if (data) {
         if (data.current_song) setSongUrl(data.current_song);
         if (data.song_title) setSongTitle(data.song_title);
         if (data.volume !== undefined) setVolume(data.volume);
+      } else if (error) {
+        console.error("Error al cargar player_state:", error);
       }
     };
     fetchState();
-
-    // Canal en tiempo real para sincronizar volumen u otros estados
-    const channel = supabase
-      .channel('public:player_state_web')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'player_state', filter: 'id=eq.1' }, (payload) => {
-        if (payload.new.volume !== undefined) setVolume(payload.new.volume);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   // Loop principal (Host): Revisa la cola de canciones cada 10 segundos
   useEffect(() => {
+    if (!hasInteracted) return; // No procesar cola hasta que el usuario active el audio
+
     const interval = setInterval(async () => {
-      if (isPlayingQueue) return; // Si ya está procesando una canción, espera
+      if (isPlayingQueue) return;
 
       const { data: queue, error } = await supabase
         .from('song_queue')
@@ -261,7 +253,6 @@ export function WebMusicPlayer() {
         .limit(1);
 
       if (error || !queue || queue.length === 0) {
-        // Si la cola está vacía, mantener Lofi Girl por defecto
         const lofiUrl = 'https://stream.zeno.fm/f3wvbbqmdg8uv';
         if (songUrl !== lofiUrl) {
           setSongUrl(lofiUrl);
@@ -274,7 +265,6 @@ export function WebMusicPlayer() {
         return;
       }
 
-      // Procesar la canción en la cola
       setIsPlayingQueue(true);
       const currentItem = queue[0];
       console.log("Procesando canción de la cola en la web:", currentItem.song_name);
@@ -285,21 +275,19 @@ export function WebMusicPlayer() {
         setSongUrl(mp3Url);
         setSongTitle(currentItem.song_name);
 
-        // Actualizar player_state para que las apps móviles lo reproduzcan en directo
         await supabase.from('player_state').update({
           current_song: mp3Url,
           song_title: currentItem.song_name
         }).eq('id', 1);
       }
 
-      // Borrar la canción atendida de la cola
       await supabase.from('song_queue').delete().eq('id', currentItem.id);
       setIsPlayingQueue(false);
 
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [isPlayingQueue, songUrl]);
+  }, [isPlayingQueue, songUrl, hasInteracted]);
 
   const handleVolumeChange = async (newVol: number) => {
     setVolume(newVol);
@@ -311,10 +299,21 @@ export function WebMusicPlayer() {
       <h3 className="text-white font-bold mb-1">🎵 Reproductor Biblio (Host Web)</h3>
       <p className="text-xs text-amber-400 mb-3" style={{ wordBreak: 'break-all' }}>Sonando: {songTitle}</p>
       
-      {/* Reproductor de audio real ejecutándose en la web */}
-      <div className="mb-3">
-        <ReactPlayer url={songUrl} volume={volume} playing controls width="100%" height="50px" />
-      </div>
+      {!hasInteracted ? (
+        <div className="mb-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-center">
+          <p className="text-xs text-amber-300 mb-2">El navegador requiere una interacción para reproducir audio.</p>
+          <Button 
+            onClick={() => setHasInteracted(true)} 
+            className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold"
+          >
+            🔊 Activar Reproductor y Cola
+          </Button>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <ReactPlayer url={songUrl} volume={volume} playing controls width="100%" height="50px" />
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <span className="text-white text-sm">Volumen:</span>
@@ -331,7 +330,6 @@ export function WebMusicPlayer() {
     </div>
   );
 }
-
 // --- LÓGICA DE RACHA CON EXENCIÓN DE FINES DE SEMANA ---
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
   if (!sessions || sessions.length === 0) return 0;
