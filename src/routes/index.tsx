@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wifi, WifiOff, LogIn, LogOut, Trophy, Loader2, Sparkles, Archive } from "lucide-react";
+import { Wifi, WifiOff, LogIn, LogOut, Trophy, Loader2, Sparkles, Archive, Megaphone } from "lucide-react";
 import { PastRankingsPublic } from "@/components/PastRankings";
 
 import { toast } from "sonner";
@@ -23,7 +23,6 @@ const HEARTBEAT_MS = 60 * 60 * 1000; // 1 hora (guardado progresivo)
 const OFFLINE_GRACE_MS = 60 * 1000; // 1 minuto
 const OPEN_HOUR_AR = 7;   // 07:00 hs apertura
 const CLOSE_HOUR_AR = 20; // 20:00 hs cierre general
-
 
 // Argentina = UTC-3 (sin DST)
 function getArgHour(d: Date = new Date()) {
@@ -106,7 +105,6 @@ async function getActiveMultiplier(userName?: string): Promise<ActiveEvent> {
       .eq("is_active", true);
 
     if (userInv && userInv.length > 0) {
-      // Traer la configuración de los ítems desde shop_items para evaluar dinámicamente
       const { data: shopCatalog } = await supabase
         .from("shop_items")
         .select("id, name, effect_type, effect_value");
@@ -116,7 +114,6 @@ async function getActiveMultiplier(userName?: string): Promise<ActiveEvent> {
 
       for (const inv of userInv) {
         if (inv.expires_at && new Date(inv.expires_at).getTime() <= nowTime) {
-          // Desactivar automáticamente si expiró
           await supabase
             .from("user_inventory")
             .update({ is_active: false })
@@ -320,12 +317,10 @@ function Index() {
   // Estados para el Screamer en la Web (dinámico desde la BD)
   const [screamerActive, setScreamerActive] = useState(false);
   const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
-  const [megaphoneModalVisible, setMegaphoneModalVisible] = useState(false);
-  const [megaphoneTarget, setMegaphoneTarget] = useState('');
-  const [megaphoneMessage, setMegaphoneMessage] = useState('');
-  const [megaphoneSuggestions, setMegaphoneSuggestions] = useState<string[]>([]);
-  const [showMegaphoneSuggestions, setShowMegaphoneSuggestions] = useState(false);
-  const [megaphoneLoading, setMegaphoneLoading] = useState(false);
+
+  // Estado para el envío de Megáfonos globales desde la Web
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastLoading, setBroadcastLoading] = useState(false);
 
   // Función para comprobar y disparar el Screamer web al hacer Check-in consultando la galería dinámica
   const checkAndTriggerScreamerWeb = async (name: string) => {
@@ -345,7 +340,6 @@ function Index() {
         .update({ triggered: true })
         .eq('id', data.id);
 
-      // Carga dinámica de imágenes de screamer desde la base de datos
       const { data: galleryItems } = await supabase
         .from('screamer_gallery')
         .select('image_url, is_surprise')
@@ -361,70 +355,74 @@ function Index() {
       console.error('Error al comprobar sustos pendientes en web:', err);
     }
   };
-  const handleSendMegaphone = async () => {
-  const megaphoneItem = shopItems.find(i => i.id === 'megafono_anonimo');
-  const price = megaphoneItem ? megaphoneItem.price : 20;
 
-  if (coins < price) { showSuccessModal(`⚠️ Necesitas ${price} monedas.`); return; }
-  if (!megaphoneTarget.trim() || !megaphoneMessage.trim()) {
-    showSuccessModal('⚠️ Ingresa un destinatario y un mensaje.');
-    return;
-  }
+  // Función para enviar el Megáfono global consumiendo 1 unidad del inventario
+  const handleSendBroadcastWithMegaphone = async () => {
+    if (!userName.trim()) {
+      toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
+      return;
+    }
+    if (!broadcastMessage.trim()) {
+      toast.error("⚠️ Escribe un mensaje para el megáfono.");
+      return;
+    }
 
-  setMegaphoneLoading(true);
-  try {
-    const { data: targetExists } = await supabase.from('user_wallet').select('user_name').eq('user_name', megaphoneTarget).maybeSingle();
-    if (!targetExists) { showSuccessModal('❌ El usuario no existe.'); setMegaphoneLoading(false); return; }
-    
-    const newCoins = coins - price;
-    await supabase.from('user_wallet').update({ coins: newCoins }).eq('user_name', userName);
-    
-    // Lo guardamos en la misma tabla de pending_punishments (o puedes crear una de pending_messages)
-    await supabase.from('pending_punishments').insert({ 
-      target_user: megaphoneTarget, 
-      from_user: userName, 
-      punishment_type: 'megaphone', 
-      message: megaphoneMessage, // Asegúrate de tener esta columna en tu tabla si quieres guardar el texto
-      triggered: false 
-    });
-    
-    setCoins(newCoins);
-    setMegaphoneModalVisible(false);
-    setMegaphoneTarget('');
-    setMegaphoneMessage('');
-    showSuccessModal(`📢 ¡Megáfono enviado a ${megaphoneTarget}!`);
-  } catch (err) { 
-    showSuccessModal('❌ Error al enviar el mensaje.'); 
-  } finally { 
-    setMegaphoneLoading(false); 
-  }
-};
+    setBroadcastLoading(true);
+    try {
+      // 1. Verificar si el usuario tiene al menos un megáfono disponible en su inventario
+      const { data: inventoryItems, error: invError } = await supabase
+        .from('user_inventory')
+        .select('id')
+        .eq('user_name', userName)
+        .eq('item_id', 'megafono_anonimo')
+        .limit(1);
 
-const checkAndTriggerMegaphone = async (name: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('pending_punishments')
-      .select('*')
-      .eq('target_user', name)
-      .eq('punishment_type', 'megaphone')
-      .eq('triggered', false)
-      .limit(1)
-      .maybeSingle();
+      if (invError || !inventoryItems || inventoryItems.length === 0) {
+        toast.error("⚠️ No tienes megáfonos disponibles. ¡Compra uno en la tienda desde la app!");
+        setBroadcastLoading(false);
+        return;
+      }
 
-    if (error || !data) return;
+      const itemToDeleteId = inventoryItems[0].id;
 
-    // Marcarlo como disparado
-    await supabase
-      .from('pending_punishments')
-      .update({ triggered: true })
-      .eq('id', data.id);
+      // 2. Consumir (eliminar) exactamente 1 megáfono del inventario
+      const { error: deleteError } = await supabase
+        .from('user_inventory')
+        .delete()
+        .eq('id', itemToDeleteId);
 
-    // Mostrar modal con el mensaje personalizado
-    showSuccessModal(`📢 ¡Mensaje por Megáfono!\n\n"${data.message}"`);
-  } catch (err) {
-    console.error('Error al comprobar megáfonos:', err);
-  }
-};
+      if (deleteError) {
+        toast.error("❌ Error al descontar el megáfono del inventario.");
+        setBroadcastLoading(false);
+        return;
+      }
+
+      // 3. Publicar el Broadcast global en la tabla 'settings'
+      const { error: settingsError } = await supabase
+        .from('settings')
+        .update({
+          active: true,
+          event_name: `📢 ${userName}: "${broadcastMessage}"`,
+          expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // Visible por 30 minutos
+          updated_at: new Date().toISOString()
+        })
+        .eq('key', 'multiplier');
+
+      if (settingsError) {
+        toast.error("❌ Error al transmitir el broadcast.");
+        setBroadcastLoading(false);
+        return;
+      }
+
+      toast.success("📢 ¡Megáfono transmitido con éxito! Se ha descontado 1 unidad.");
+      setBroadcastMessage('');
+    } catch (err) {
+      console.error('Error al enviar megáfono:', err);
+      toast.error("❌ Ocurrió un error inesperado.");
+    } finally {
+      setBroadcastLoading(false);
+    }
+  };
 
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
@@ -548,7 +546,6 @@ const checkAndTriggerMegaphone = async (name: string) => {
           let label = '';
           let isMain = false;
 
-          // Renderizado dinámico según el effect_type definido en la base de datos
           if (itemDef.effect_type === 'badge') {
             label = itemDef.effect_value?.badge_text || itemDef.name;
             isMain = true;
@@ -728,7 +725,6 @@ const checkAndTriggerMegaphone = async (name: string) => {
     setLastVerified(Date.now());
     
     await checkAndTriggerScreamerWeb(name);
-    await checkAndTriggerMegaphone(name);
 
     toast.success(`Check-in registrado, ${name}`);
   };
@@ -1146,6 +1142,31 @@ const checkAndTriggerMegaphone = async (name: string) => {
                   </Button>
                 </>
               )}
+            </Card>
+
+            {/* CARD PARA TRANSMITIR MEGÁFONO GLOBAL */}
+            <Card className="p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-base">Enviar Megáfono Anónimo</h3>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Transmite un mensaje global a la pantalla de todos. Esto consumirá automáticamente 1 unidad de tu inventario.
+              </p>
+              <Input
+                placeholder="Escribe tu mensaje global..."
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+              />
+              <Button
+                onClick={handleSendBroadcastWithMegaphone}
+                disabled={broadcastLoading || !broadcastMessage.trim()}
+                className="w-full"
+                variant="secondary"
+              >
+                {broadcastLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Megaphone className="mr-2 h-4 w-4" />}
+                Transmitir Megáfono
+              </Button>
             </Card>
           </TabsContent>
 
