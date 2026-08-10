@@ -357,8 +357,7 @@ function Index() {
     }
   };
 
- // Función para enviar el Megáfono global consumiendo 1 unidad del inventario
- // Función para enviar el Megáfono global actualizando el banner visual y consumiendo 1 unidad
+ // Función para enviar el Megáfono global desde la web
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
       toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
@@ -371,7 +370,7 @@ function Index() {
 
     setBroadcastLoading(true);
     try {
-      // 1. Verificar si el usuario tiene al menos un megáfono disponible en su inventario
+      // 1. Verificar si el usuario tiene al menos un megáfono en su inventario
       const { data: inventoryItems, error: invError } = await supabase
         .from('user_inventory')
         .select('id')
@@ -387,7 +386,7 @@ function Index() {
 
       const itemToDeleteId = inventoryItems[0].id;
 
-      // 2. Consumir (eliminar) exactamente 1 megáfono del inventario
+      // 2. Consumir (eliminar) 1 megáfono del inventario
       const { error: deleteError } = await supabase
         .from('user_inventory')
         .delete()
@@ -399,20 +398,16 @@ function Index() {
         return;
       }
 
-      // 3. Actualizar la tabla 'settings' para que el BroadcastBanner lo muestre en la web con duración de 1 hora
-      const { error: settingsError } = await supabase
-        .from('settings')
-        .update({
-          active: true,
-          multiplier: 1, // Mantiene el multiplicador normal sin alterarlo
-          event_name: `📢 ${userName}: "${broadcastMessage}"`, // El texto que lee el banner web
-          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // Expira en 1 hora exacta
-          updated_at: new Date().toISOString()
-        })
-        .eq('key', 'multiplier');
+      // 3. Insertar el broadcast exactamente igual que el panel de administración (type: "text") por 1 hora
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
+        type: "text",
+        message: `📢 ${userName}: "${broadcastMessage}"`,
+        expires_at: expiresAt,
+      });
 
-      if (settingsError) {
-        toast.error("❌ Error al transmitir el megáfono.");
+      if (broadcastError) {
+        toast.error("❌ Error al enviar el broadcast a la base de datos.");
         setBroadcastLoading(false);
         return;
       }
