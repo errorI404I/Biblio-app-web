@@ -24,6 +24,7 @@ const OFFLINE_GRACE_MS = 60 * 1000; // 1 minuto
 const OPEN_HOUR_AR = 7;   // 07:00 hs apertura
 const CLOSE_HOUR_AR = 20; // 20:00 hs cierre general
 
+
 // Argentina = UTC-3 (sin DST)
 function getArgHour(d: Date = new Date()) {
   return (d.getUTCHours() + 24 - 3) % 24;
@@ -319,6 +320,12 @@ function Index() {
   // Estados para el Screamer en la Web (dinámico desde la BD)
   const [screamerActive, setScreamerActive] = useState(false);
   const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
+  const [megaphoneModalVisible, setMegaphoneModalVisible] = useState(false);
+  const [megaphoneTarget, setMegaphoneTarget] = useState('');
+  const [megaphoneMessage, setMegaphoneMessage] = useState('');
+  const [megaphoneSuggestions, setMegaphoneSuggestions] = useState<string[]>([]);
+  const [showMegaphoneSuggestions, setShowMegaphoneSuggestions] = useState(false);
+  const [megaphoneLoading, setMegaphoneLoading] = useState(false);
 
   // Función para comprobar y disparar el Screamer web al hacer Check-in consultando la galería dinámica
   const checkAndTriggerScreamerWeb = async (name: string) => {
@@ -354,6 +361,70 @@ function Index() {
       console.error('Error al comprobar sustos pendientes en web:', err);
     }
   };
+  const handleSendMegaphone = async () => {
+  const megaphoneItem = shopItems.find(i => i.id === 'megafono_anonimo');
+  const price = megaphoneItem ? megaphoneItem.price : 20;
+
+  if (coins < price) { showSuccessModal(`⚠️ Necesitas ${price} monedas.`); return; }
+  if (!megaphoneTarget.trim() || !megaphoneMessage.trim()) {
+    showSuccessModal('⚠️ Ingresa un destinatario y un mensaje.');
+    return;
+  }
+
+  setMegaphoneLoading(true);
+  try {
+    const { data: targetExists } = await supabase.from('user_wallet').select('user_name').eq('user_name', megaphoneTarget).maybeSingle();
+    if (!targetExists) { showSuccessModal('❌ El usuario no existe.'); setMegaphoneLoading(false); return; }
+    
+    const newCoins = coins - price;
+    await supabase.from('user_wallet').update({ coins: newCoins }).eq('user_name', userName);
+    
+    // Lo guardamos en la misma tabla de pending_punishments (o puedes crear una de pending_messages)
+    await supabase.from('pending_punishments').insert({ 
+      target_user: megaphoneTarget, 
+      from_user: userName, 
+      punishment_type: 'megaphone', 
+      message: megaphoneMessage, // Asegúrate de tener esta columna en tu tabla si quieres guardar el texto
+      triggered: false 
+    });
+    
+    setCoins(newCoins);
+    setMegaphoneModalVisible(false);
+    setMegaphoneTarget('');
+    setMegaphoneMessage('');
+    showSuccessModal(`📢 ¡Megáfono enviado a ${megaphoneTarget}!`);
+  } catch (err) { 
+    showSuccessModal('❌ Error al enviar el mensaje.'); 
+  } finally { 
+    setMegaphoneLoading(false); 
+  }
+};
+
+const checkAndTriggerMegaphone = async (name: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('pending_punishments')
+      .select('*')
+      .eq('target_user', name)
+      .eq('punishment_type', 'megaphone')
+      .eq('triggered', false)
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return;
+
+    // Marcarlo como disparado
+    await supabase
+      .from('pending_punishments')
+      .update({ triggered: true })
+      .eq('id', data.id);
+
+    // Mostrar modal con el mensaje personalizado
+    showSuccessModal(`📢 ¡Mensaje por Megáfono!\n\n"${data.message}"`);
+  } catch (err) {
+    console.error('Error al comprobar megáfonos:', err);
+  }
+};
 
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
@@ -657,6 +728,7 @@ function Index() {
     setLastVerified(Date.now());
     
     await checkAndTriggerScreamerWeb(name);
+    await checkAndTriggerMegaphone(name);
 
     toast.success(`Check-in registrado, ${name}`);
   };
