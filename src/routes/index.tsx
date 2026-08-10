@@ -356,7 +356,7 @@ function Index() {
     }
   };
 
-  // Función para enviar el Megáfono global consumiendo 1 unidad del inventario
+ // Función para enviar el Megáfono global consumiendo 1 unidad del inventario
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
       toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
@@ -397,16 +397,17 @@ function Index() {
         return;
       }
 
-      // 3. Publicar el Broadcast global en la tabla 'settings'
+      // 3. Publicar el Broadcast como texto puro (ajusta la key o la tabla según tu componente BroadcastBanner)
       const { error: settingsError } = await supabase
         .from('settings')
         .update({
           active: true,
-          event_name: `📢 ${userName}: "${broadcastMessage}"`,
+          multiplier: 1, // <--- Nos aseguramos de NO alterar el multiplicador (se queda en 1x)
+          event_name: `📢 ${userName}: "${broadcastMessage}"`, // <--- El texto del mensaje que lee el banner
           expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // Visible por 30 minutos
           updated_at: new Date().toISOString()
         })
-        .eq('key', 'multiplier');
+        .eq('key', 'multiplier'); // O la clave específica que utilice tu banner de texto global
 
       if (settingsError) {
         toast.error("❌ Error al transmitir el broadcast.");
@@ -423,7 +424,6 @@ function Index() {
       setBroadcastLoading(false);
     }
   };
-
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
