@@ -357,7 +357,6 @@ function Index() {
     }
   };
 
- // Función para enviar el Megáfono global desde la web
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
       toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
@@ -370,7 +369,7 @@ function Index() {
 
     setBroadcastLoading(true);
     try {
-      // 1. Verificar si el usuario tiene al menos un megáfono en su inventario
+      // 1. Verificar si el usuario tiene al menos un megáfono disponible en su inventario
       const { data: inventoryItems, error: invError } = await supabase
         .from('user_inventory')
         .select('id')
@@ -386,7 +385,7 @@ function Index() {
 
       const itemToDeleteId = inventoryItems[0].id;
 
-      // 2. Consumir (eliminar) 1 megáfono del inventario
+      // 2. Consumir (eliminar) exactamente 1 megáfono del inventario
       const { error: deleteError } = await supabase
         .from('user_inventory')
         .delete()
@@ -398,7 +397,7 @@ function Index() {
         return;
       }
 
-      // 3. Insertar el broadcast exactamente igual que el panel de administración (type: "text") por 1 hora
+      // 3. Insertar con type: "text" para que el BroadcastBanner lo muestre al instante
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
       const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
         type: "text",
