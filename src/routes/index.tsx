@@ -358,6 +358,7 @@ function Index() {
   };
 
  // Función para enviar el Megáfono global consumiendo 1 unidad del inventario
+ // Función para enviar el Megáfono global actualizando el banner visual y consumiendo 1 unidad
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
       toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
@@ -398,18 +399,20 @@ function Index() {
         return;
       }
 
-      // 3. Insertar el mensaje directamente en la tabla 'broadcasts'
-      const { error: broadcastError } = await supabase
-        .from('broadcasts')
-        .insert({
-          type: 'megaphone',
-          message: `📢 ${userName}: "${broadcastMessage}"`,
-          image_url: null,
-          expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // Expira en 30 minutos
-        });
+      // 3. Actualizar la tabla 'settings' para que el BroadcastBanner lo muestre en la web con duración de 1 hora
+      const { error: settingsError } = await supabase
+        .from('settings')
+        .update({
+          active: true,
+          multiplier: 1, // Mantiene el multiplicador normal sin alterarlo
+          event_name: `📢 ${userName}: "${broadcastMessage}"`, // El texto que lee el banner web
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // Expira en 1 hora exacta
+          updated_at: new Date().toISOString()
+        })
+        .eq('key', 'multiplier');
 
-      if (broadcastError) {
-        toast.error("❌ Error al enviar el broadcast a la base de datos.");
+      if (settingsError) {
+        toast.error("❌ Error al transmitir el megáfono.");
         setBroadcastLoading(false);
         return;
       }
@@ -422,7 +425,9 @@ function Index() {
     } finally {
       setBroadcastLoading(false);
     }
-  }; // Hotkey Ctrl+Shift+A
+  };
+
+  // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
