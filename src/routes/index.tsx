@@ -357,6 +357,7 @@ function Index() {
     }
   };
 
+ 
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
       toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
@@ -369,7 +370,7 @@ function Index() {
 
     setBroadcastLoading(true);
     try {
-      // 1. Verificar si el usuario tiene al menos un megáfono disponible en su inventario
+      // 1. Verificar inventario
       const { data: inventoryItems, error: invError } = await supabase
         .from('user_inventory')
         .select('id')
@@ -378,44 +379,45 @@ function Index() {
         .limit(1);
 
       if (invError || !inventoryItems || inventoryItems.length === 0) {
-        toast.error("⚠️ No tienes megáfonos disponibles. ¡Compra uno en la tienda desde la app!");
+        toast.error("⚠️ No tienes megáfonos disponibles.");
         setBroadcastLoading(false);
         return;
       }
 
       const itemToDeleteId = inventoryItems[0].id;
 
-      // 2. Consumir (eliminar) exactamente 1 megáfono del inventario
+      // 2. Consumir el ítem
       const { error: deleteError } = await supabase
         .from('user_inventory')
         .delete()
         .eq('id', itemToDeleteId);
 
       if (deleteError) {
-        toast.error("❌ Error al descontar el megáfono del inventario.");
+        toast.error("❌ Error al descontar el megáfono.");
         setBroadcastLoading(false);
         return;
       }
 
-      // 3. Insertar con type: "text" para que el BroadcastBanner lo muestre al instante
+      // 3. Insertar broadcast: 'message' para el banner (anónimo) y 'creador' para tu control
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
       const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
         type: "text",
-        message: `📢 ${userName}: "${broadcastMessage}"`,
+        message: `📢 ${broadcastMessage}`, // Mensaje limpio, sin nombre del usuario
+        creador: userName,                // El usuario queda guardado solo para tu control
         expires_at: expiresAt,
       });
 
       if (broadcastError) {
-        toast.error("❌ Error al enviar el broadcast a la base de datos.");
+        toast.error("❌ Error al publicar el mensaje.");
         setBroadcastLoading(false);
         return;
       }
 
-      toast.success("📢 ¡Megáfono transmitido con éxito! Se ha descontado 1 unidad.");
+      toast.success("📢 ¡Mensaje anónimo enviado!");
       setBroadcastMessage('');
     } catch (err) {
       console.error('Error al enviar megáfono:', err);
-      toast.error("❌ Ocurrió un error inesperado.");
+      toast.error("❌ Error inesperado.");
     } finally {
       setBroadcastLoading(false);
     }
