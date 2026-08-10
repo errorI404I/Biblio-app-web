@@ -18,12 +18,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, PlayCircle, FileDown, Archive, ShoppingBag, Upload } from "lucide-react";
+import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, FileDown, Archive, ShoppingBag, Upload } from "lucide-react";
 import { PastRankingsManager } from "@/components/PastRankings";
 
 const ADMIN_PASS = "54321";
 const ALLOWED_IP = "131.221.0.8";
-const HEARTBEAT_TOLERANCE_MS = 70 * 60 * 1000;
 
 type Session = {
   id: string;
@@ -46,10 +45,12 @@ type Setting = {
 
 type ShopItem = {
   id: string;
-  title: string;
+  title?: string;
+  name?: string;
   description: string | null;
   price: number;
-  type: string;
+  type?: string;
+  effect_type?: string;
 };
 
 export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -96,8 +97,6 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [seasonRunning, setSeasonRunning] = useState(false);
 
   // Diagnóstico
-  const [diagLogs, setDiagLogs] = useState<string[]>([]);
-  const [diagRunning, setDiagRunning] = useState(false);
   const [diagNow, setDiagNow] = useState(Date.now());
 
   useEffect(() => {
@@ -170,13 +169,9 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     }
 
     try {
-      // Actualizar en sesiones
       await supabase.from('sesiones').update({ user_name: newName }).eq('user_name', oldName);
-      // Actualizar en wallet
       await supabase.from('user_wallet').update({ user_name: newName }).eq('user_name', oldName);
-      // Actualizar en inventario
       await supabase.from('user_inventory').update({ user_name: newName }).eq('user_name', oldName);
-      // Actualizar en notificaciones
       await supabase.from('notifications').update({ user_name: newName }).eq('user_name', oldName);
 
       toast.success(`Usuario renombrado de "${oldName}" a "${newName}"`);
@@ -293,6 +288,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     if (!newItemTitle.trim() || !newItemPrice) return toast.error("Completa título y precio");
     const { error } = await supabase.from("shop_items").insert({
       title: newItemTitle.trim(),
+      name: newItemTitle.trim(),
       description: newItemDesc.trim() || null,
       price: parseFloat(newItemPrice),
       type: "activable",
@@ -869,7 +865,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                       {shopItems.map((item) => (
                         <div key={item.id} className="flex items-center justify-between gap-3 border p-2 rounded-lg text-sm">
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold truncate">{item.title}</div>
+                            <div className="font-semibold truncate">{item.title || item.name}</div>
                             <div className="text-xs text-muted-foreground truncate">{item.description || "Sin descripción"}</div>
                           </div>
                           

@@ -96,31 +96,44 @@ async function getActiveMultiplier(userName?: string): Promise<ActiveEvent> {
     }
   }
 
-  // Verificar si el usuario tiene activo su ítem personal "multiplicador_24h" para las horas
+  // Verificación dinámica de multiplicadores activos del usuario desde el servidor/inventario y catálogo
   if (userName) {
     const { data: userInv } = await supabase
       .from("user_inventory")
-      .select("expires_at, is_active")
+      .select("item_id, expires_at, is_active")
       .eq("user_name", userName)
-      .eq("item_id", "multiplicador_24h")
-      .eq("is_active", true)
-      .maybeSingle();
+      .eq("is_active", true);
 
-    if (userInv && userInv.expires_at) {
-      if (new Date(userInv.expires_at).getTime() > Date.now()) {
-        const personalMult = 2; // Multiplicador de horas del ítem personal
-        if (personalMult > activeMult) {
-          activeMult = personalMult;
-          activeName = "Enfoque Extremo 24h ⚡";
-          activeExpires = userInv.expires_at;
-          isGlobalActive = true;
+    if (userInv && userInv.length > 0) {
+      // Traer la configuración de los ítems desde shop_items para evaluar dinámicamente
+      const { data: shopCatalog } = await supabase
+        .from("shop_items")
+        .select("id, name, effect_type, effect_value");
+
+      const catalogMap = new Map(shopCatalog?.map(item => [item.id, item]) || []);
+      const nowTime = Date.now();
+
+      for (const inv of userInv) {
+        if (inv.expires_at && new Date(inv.expires_at).getTime() <= nowTime) {
+          // Desactivar automáticamente si expiró
+          await supabase
+            .from("user_inventory")
+            .update({ is_active: false })
+            .eq("user_name", userName)
+            .eq("item_id", inv.item_id);
+          continue;
         }
-      } else {
-        await supabase
-          .from("user_inventory")
-          .update({ is_active: false })
-          .eq("user_name", userName)
-          .eq("item_id", "multiplicador_24h");
+
+        const itemConfig = catalogMap.get(inv.item_id);
+        if (itemConfig && itemConfig.effect_type === 'multiplier') {
+          const multValue = Number(itemConfig.effect_value?.multiplier) || 2;
+          if (multValue > activeMult) {
+            activeMult = multValue;
+            activeName = `${itemConfig.name} ⚡`;
+            activeExpires = inv.expires_at;
+            isGlobalActive = true;
+          }
+        }
       }
     }
   }
@@ -197,7 +210,6 @@ async function massCloseAt(endIso: string) {
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
   if (!sessions || sessions.length === 0) return 0;
 
-  // Obtener fechas únicas ordenadas de más reciente a más antigua
   const uniqueDates = Array.from(
     new Set(
       sessions.map((s) => {
@@ -210,13 +222,11 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   if (uniqueDates.length === 0) return 0;
 
-  // Función auxiliar para saber si una fecha es sábado (6) o domingo (0)
   const isWeekend = (dateStr: string) => {
     const day = new Date(dateStr + "T00:00:00").getDay();
     return day === 0 || day === 6;
   };
 
-  // Función para restar un día a una fecha en formato YYYY-MM-DD
   const getPreviousDayStr = (dateStr: string) => {
     const d = new Date(dateStr + "T00:00:00");
     d.setDate(d.getDate() - 1);
@@ -232,7 +242,6 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   let latestDate = uniqueDates[0];
 
-  // Si la última conexión no fue hoy ni ayer, validamos si el retraso se debió al fin de semana
   if (latestDate !== todayStr && latestDate !== yesterdayStr) {
     const todayObj = new Date(todayStr + "T00:00:00");
     const latestObj = new Date(latestDate + "T00:00:00");
@@ -252,7 +261,6 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
     if (!validWeekendGap) return 0;
   }
 
-  // Recorrer y contar la racha hacia atrás saltando fines de semana
   let expectedDateStr = latestDate;
   for (let i = 0; i < uniqueDates.length; i++) {
     if (uniqueDates[i] === expectedDateStr) {
@@ -308,11 +316,11 @@ function Index() {
   const [insult, setInsult] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Estados para el Screamer en la Web
+  // Estados para el Screamer en la Web (dinámico desde la BD)
   const [screamerActive, setScreamerActive] = useState(false);
   const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
 
-  // Función para comprobar y disparar el Screamer web al hacer Check-in
+  // Función para comprobar y disparar el Screamer web al hacer Check-in consultando la galería dinámica
   const checkAndTriggerScreamerWeb = async (name: string) => {
     try {
       const { data, error } = await supabase
@@ -330,21 +338,17 @@ function Index() {
         .update({ triggered: true })
         .eq('id', data.id);
 
-      const isSurprise = Math.random() < 0.01;
-      let selectedImage = '';
+      // Carga dinámica de imágenes de screamer desde la base de datos
+      const { data: galleryItems } = await supabase
+        .from('screamer_gallery')
+        .select('image_url, is_surprise')
+        .eq('active', true);
 
-      if (isSurprise) {
-        selectedImage = 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5';
-      } else {
-        const normalPhotos = [
-          'https://images.unsplash.com/photo-1518709268805-4e9042af9f23',
-          'https://images.unsplash.com/photo-1508739773434-c26b3d09e071',
-          'https://images.unsplash.com/photo-1534447677768-be436bb09401',
-        ];
-        selectedImage = normalPhotos[Math.floor(Math.random() * normalPhotos.length)];
-      }
+      if (!galleryItems || galleryItems.length === 0) return;
 
-      setScreamerData({ image: selectedImage, isSurprise });
+      const randomScreamer = galleryItems[Math.floor(Math.random() * galleryItems.length)];
+
+      setScreamerData({ image: randomScreamer.image_url, is_surprise: randomScreamer.is_surprise });
       setScreamerActive(true);
     } catch (err) {
       console.error('Error al comprobar sustos pendientes en web:', err);
@@ -422,9 +426,10 @@ function Index() {
   const systemOpen = isWithinOpenHours(new Date(now));
 
   const loadLeaders = useCallback(async () => {
-    const [{ data: sessionsData }, { data: inventoryData }] = await Promise.all([
+    const [{ data: sessionsData }, { data: inventoryData }, { data: shopCatalog }] = await Promise.all([
       supabase.from('sesiones').select("user_name,total_minutes,end_time,start_time"),
-      supabase.from('user_inventory').select("user_name,item_id,is_active,expires_at")
+      supabase.from('user_inventory').select("user_name,item_id,is_active,expires_at"),
+      supabase.from('shop_items').select("id, name, effect_type, effect_value")
     ]);
     if (!sessionsData) return;
     
@@ -443,6 +448,7 @@ function Index() {
       userSessionsMap.set(r.user_name, userList);
     }
 
+    const catalogMap = new Map(shopCatalog?.map(item => [item.id, item]) || []);
     const userBadgesMap = new Map<string, { mainBadge: string | null; temporalBadges: string[] }>();
     const singleUseItems = new Set(['ruleta_extra']);
 
@@ -465,16 +471,20 @@ function Index() {
         const temporalBadges: string[] = [];
 
         for (const inv of items) {
+          const itemDef = catalogMap.get(inv.item_id);
+          if (!itemDef) continue;
+
           let label = '';
           let isMain = false;
 
-          if (inv.item_id === 'badge_legend') {
-            label = '🏆 Estudiante Legendario';
-            isMain = true; 
-          } else if (inv.item_id === 'multiplicador_24h' && inv.is_active) {
-            label = '⚡ Enfoque Extremo (x2)';
-          } else if (inv.item_id === 'cafe_biblio') {
-            label = '☕ Amante del Café';
+          // Renderizado dinámico según el effect_type definido en la base de datos
+          if (itemDef.effect_type === 'badge') {
+            label = itemDef.effect_value?.badge_text || itemDef.name;
+            isMain = true;
+          } else if (itemDef.effect_type === 'multiplier' && inv.is_active) {
+            label = `${itemDef.name} (x${itemDef.effect_value?.multiplier || 2})`;
+          } else if (itemDef.effect_type === 'protect_streak') {
+            label = `☕ ${itemDef.name}`;
           }
 
           if (!label) continue;
