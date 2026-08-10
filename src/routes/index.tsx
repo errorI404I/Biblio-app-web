@@ -319,7 +319,8 @@ function Index() {
   const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
 
   // Estado para el envío de Megáfonos globales desde la Web
-  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [
+    broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastLoading, setBroadcastLoading] = useState(false);
 
   // Función para comprobar y disparar el Screamer web al hacer Check-in consultando la galería dinámica
@@ -397,20 +398,18 @@ function Index() {
         return;
       }
 
-      // 3. Publicar el Broadcast como texto puro (ajusta la key o la tabla según tu componente BroadcastBanner)
-      const { error: settingsError } = await supabase
-        .from('settings')
-        .update({
-          active: true,
-          multiplier: 1, // <--- Nos aseguramos de NO alterar el multiplicador (se queda en 1x)
-          event_name: `📢 ${userName}: "${broadcastMessage}"`, // <--- El texto del mensaje que lee el banner
-          expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // Visible por 30 minutos
-          updated_at: new Date().toISOString()
-        })
-        .eq('key', 'multiplier'); // O la clave específica que utilice tu banner de texto global
+      // 3. Insertar el mensaje directamente en la tabla 'broadcasts'
+      const { error: broadcastError } = await supabase
+        .from('broadcasts')
+        .insert({
+          type: 'megaphone',
+          message: `📢 ${userName}: "${broadcastMessage}"`,
+          image_url: null,
+          expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() // Expira en 30 minutos
+        });
 
-      if (settingsError) {
-        toast.error("❌ Error al transmitir el broadcast.");
+      if (broadcastError) {
+        toast.error("❌ Error al enviar el broadcast a la base de datos.");
         setBroadcastLoading(false);
         return;
       }
@@ -423,8 +422,7 @@ function Index() {
     } finally {
       setBroadcastLoading(false);
     }
-  };
-  // Hotkey Ctrl+Shift+A
+  }; // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
