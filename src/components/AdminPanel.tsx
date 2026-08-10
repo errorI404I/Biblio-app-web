@@ -350,10 +350,25 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   };
 
   const adjustUserTime = async (name: string) => {
-    const v = prompt(`Ajustar minutos para "${name}" (+sumar / -restar):`, "0");
+    const currentMinutes = ranking.find((r) => r.user_name === name)?.minutes ?? 0;
+    const currentHoursFormatted = (currentMinutes / 60).toFixed(2);
+
+    const v = prompt(`Ajustar tiempo total para "${name}"\nActualmente tiene: ${currentHoursFormatted} hs (${currentMinutes} min).\n\nIngresa el NUEVO TOTAL de horas exactas (ej: 3 o 3.5):`, currentHoursFormatted);
     if (v == null) return;
-    const delta = parseInt(v, 10);
-    if (Number.isNaN(delta) || delta === 0) return toast.error("Valor inválido");
+
+    const targetHours = parseFloat(v);
+    if (Number.isNaN(targetHours) || targetHours < 0) {
+      return toast.error("Valor numérico inválido");
+    }
+
+    const targetMinutes = Math.round(targetHours * 60);
+    const delta = targetMinutes - currentMinutes;
+
+    if (delta === 0) {
+      toast.info("El usuario ya tiene exactamente esa cantidad de tiempo.");
+      return;
+    }
+
     const nowIso = new Date().toISOString();
     const { error } = await supabase.from('sesiones').insert({
       user_name: name,
@@ -362,10 +377,12 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       total_minutes: delta,
       last_seen: nowIso,
       multiplier: 1,
-      event_name: delta >= 0 ? "Ajuste admin (+)" : "Penalización admin (−)",
+      event_name: delta >= 0 ? "Ajuste manual admin (Fijar total +)" : "Ajuste manual admin (Fijar total −)",
     });
-    if (error) return toast.error("Error al ajustar");
-    toast.success(`⏱ ${name}: ${delta > 0 ? "+" : ""}${delta} min`);
+
+    if (error) return toast.error("Error al ajustar el tiempo");
+    
+    toast.success(`⏱ ${name} actualizado a ${targetHours} hs (${delta > 0 ? "+" : ""}${delta} min)`);
     loadAll();
   };
 
