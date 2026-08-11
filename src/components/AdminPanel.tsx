@@ -163,7 +163,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }
 
   // Comparamos el texto guardado en Supabase con lo que tipeó el admin
-  if (data.value === passwordIngresada) {
+  if (Number(data.value) === Number(passwordIngresada)) {
     setAdminOpen(true);
     return true;
   } else {
