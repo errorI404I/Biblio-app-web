@@ -579,10 +579,10 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               type="password"
               value={pass}
               onChange={(e) => setPass(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && tryAuth()}
+              onKeyDown={(e) => e.key === "Enter" && tryAuth(pass)}
               autoFocus
             />
-            <Button onClick={tryAuth} className="w-full">Ingresar</Button>
+            <Button onClick={() => tryAuth(pass)} className="w-full">Ingresar</Button>
           </div>
         ) : (
           <Tabs defaultValue="live">
