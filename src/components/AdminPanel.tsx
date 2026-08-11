@@ -153,7 +153,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const tryAuth = async (passwordIngresada: string) => {
   const { data, error } = await supabase
     .from('app_config')
-    .select('value')
+    .select('valor')
     .eq('key', 'admin_password')
     .single();
 
@@ -163,7 +163,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }
 
   // Comparamos el texto guardado en Supabase con lo que tipeó el admin
-  if (Number(data.value) === Number(passwordIngresada)) {
+  if (data.value === passwordIngresada) {
     setAdminOpen(true);
     return true;
   } else {
