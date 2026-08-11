@@ -149,24 +149,32 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       return () => clearInterval(t);
     }
   }, [authed]);
-
   const tryAuth = async (passwordIngresada: string) => {
+  console.log("1. Intentando autenticar con:", passwordIngresada);
+
   const { data, error } = await supabase
     .from('app_config')
     .select('valor')
     .eq('key', 'admin_password')
     .single();
 
+  console.log("2. Respuesta cruda de Supabase - Error:", error);
+  console.log("3. Respuesta cruda de Supabase - Data:", data);
+
   if (error || !data) {
+    console.log("⚠️ Falló la consulta a Supabase");
     toast.error("Error al verificar credenciales de admin.");
     return false;
   }
 
-  // Comparamos el texto guardado en Supabase con lo que tipeó el admin
-  if (data.value === passwordIngresada) {
+  console.log("4. Comparando -> BD:", JSON.stringify(data.valor), "vs Ingresado:", JSON.stringify(passwordIngresada));
+
+  if (String(data.valor).trim() === String(passwordIngresada).trim()) {
+    console.log("✅ ¡Contraseña correcta!");
     setAdminOpen(true);
     return true;
   } else {
+    console.log("❌ Contraseña incorrecta");
     toast.error("Contraseña incorrecta");
     return false;
   }
