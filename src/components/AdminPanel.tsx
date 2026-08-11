@@ -171,7 +171,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   if (String(data.valor).trim() === String(passwordIngresada).trim()) {
     console.log("✅ ¡Contraseña correcta!");
-    setAdminOpen(true);
+    setAuthed(true);
     return true;
   } else {
     console.log("❌ Contraseña incorrecta");
