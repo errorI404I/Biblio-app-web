@@ -150,7 +150,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     }
   }, [authed]);
 
-  const tryAuth = = async (passwordIngresada: string) => {
+  const tryAuth = async (passwordIngresada: string) => {
   const { data, error } = await supabase
     .from('app_config')
     .select('value')
