@@ -204,10 +204,10 @@ async function massCloseAt(endIso: string) {
   return count;
 }
 
-// --- LÓGICA DE RACHA CON EXENCIÓN DE FINES DE SEMANA ---
 function calculateStreak(sessions: { start_time?: string | null }[]): number {
   if (!sessions || sessions.length === 0) return 0;
 
+  // 1. Extraer fechas únicas ordenadas de la más reciente a la más antigua
   const uniqueDates = Array.from(
     new Set(
       sessions.map((s) => {
@@ -222,7 +222,7 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   const isWeekend = (dateStr: string) => {
     const day = new Date(dateStr + "T00:00:00").getDay();
-    return day === 0 || day === 6;
+    return day === 0 || day === 6; // Sábado o Domingo
   };
 
   const getPreviousDayStr = (dateStr: string) => {
@@ -233,55 +233,42 @@ function calculateStreak(sessions: { start_time?: string | null }[]): number {
 
   let streak = 0;
   const todayStr = new Date().toISOString().split("T")[0];
-  
   const yesterdayDate = new Date();
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
   const yesterdayStr = yesterdayDate.toISOString().split("T")[0];
 
   let latestDate = uniqueDates[0];
 
+  // 2. Validar si el último registro está vigente (hoy, ayer, o un viernes si hoy es lunes)
   if (latestDate !== todayStr && latestDate !== yesterdayStr) {
-    const todayObj = new Date(todayStr + "T00:00:00");
-    const latestObj = new Date(latestDate + "T00:00:00");
-    const diffTime = Math.abs(todayObj.getTime() - latestObj.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    let validWeekendGap = true;
     let checkDate = todayStr;
-    for (let d = 0; d < diffDays - 1; d++) {
+    let valid = true;
+    while (checkDate !== latestDate) {
       checkDate = getPreviousDayStr(checkDate);
-      if (!isWeekend(checkDate)) {
-        validWeekendGap = false;
+      if (!isWeekend(checkDate) && checkDate !== latestDate) {
+        valid = false;
         break;
       }
     }
-
-    if (!validWeekendGap) return 0;
+    if (!valid) return 0;
   }
 
+  // 3. Recorrer las fechas contando la racha y saltando fines de semana automáticamente
   let expectedDateStr = latestDate;
-  for (let i = 0; i < uniqueDates.length; i++) {
+  let i = 0;
+
+  while (i < uniqueDates.length) {
     if (uniqueDates[i] === expectedDateStr) {
       streak++;
       expectedDateStr = getPreviousDayStr(expectedDateStr);
+      i++;
     } else {
-      let found = false;
-      let tempDate = expectedDateStr;
-      
-      for (let w = 0; w < 2; w++) {
-        tempDate = getPreviousDayStr(tempDate);
-        if (isWeekend(tempDate) && uniqueDates[i] === tempDate) {
-          streak++;
-          expectedDateStr = getPreviousDayStr(tempDate);
-          found = true;
-          break;
-        }
-      }
-
-      if (!found) {
-        break;
+      // Si el día esperado es fin de semana, lo saltamos en la cuenta sin romper la racha
+      if (isWeekend(expectedDateStr)) {
+        expectedDateStr = getPreviousDayStr(expectedDateStr);
       } else {
-        i--; 
+        // Si esperábamos un día hábil y el usuario no se conectó, se corta la racha
+        break;
       }
     }
   }

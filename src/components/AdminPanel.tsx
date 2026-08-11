@@ -21,7 +21,6 @@ import {
 import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, FileDown, Archive, ShoppingBag, Upload } from "lucide-react";
 import { PastRankingsManager } from "@/components/PastRankings";
 
-const ADMIN_PASS = "54321";
 const ALLOWED_IP = "131.221.0.8";
 
 type Session = {
@@ -151,10 +150,27 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
     }
   }, [authed]);
 
-  const tryAuth = () => {
-    if (pass === ADMIN_PASS) setAuthed(true);
-    else toast.error("Clave incorrecta");
-  };
+  const tryAuth = = async (passwordIngresada: string) => {
+  const { data, error } = await supabase
+    .from('app_config')
+    .select('value')
+    .eq('key', 'admin_password')
+    .single();
+
+  if (error || !data) {
+    toast.error("Error al verificar credenciales de admin.");
+    return false;
+  }
+
+  // Comparamos el texto guardado en Supabase con lo que tipeó el admin
+  if (data.value === passwordIngresada) {
+    setAdminOpen(true);
+    return true;
+  } else {
+    toast.error("Contraseña incorrecta");
+    return false;
+  }
+};
 
   // Funciones para Gestión de Usuarios
   const handleRenameUser = async (oldName: string) => {
