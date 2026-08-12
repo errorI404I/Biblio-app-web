@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, FileDown, Archive, ShoppingBag, Upload } from "lucide-react";
+import { Trash2, Save, Lock, Activity, Sparkles, History, Zap, Pencil, Users, LogOut, Clock, Megaphone, Image as ImageIcon, Trophy, Terminal, FileDown, Archive, ShoppingBag, Upload, Calendar } from "lucide-react";
 import { PastRankingsManager } from "@/components/PastRankings";
 
 const ALLOWED_IP = "131.221.0.8";
@@ -64,6 +64,11 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const [eventMinutes, setEventMinutes] = useState<number>(0);
   const [eventExpiresAt, setEventExpiresAt] = useState<string | null>(null);
   
+  // Fechas Especiales / Excepciones de Racha
+  const [fechasEspeciales, setFechasEspeciales] = useState<any[]>([]);
+  const [nuevaFecha, setNuevaFecha] = useState("");
+  const [nuevaDesc, setNuevaDesc] = useState("");
+  
   // Broadcast
   const [bcastMsg, setBcastMsg] = useState("");
   const [bcastMins, setBcastMins] = useState(10);
@@ -105,7 +110,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }, [authed]);
 
   const loadAll = async () => {
-    const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }, { data: usersData }] = await Promise.all([
+    const [{ data: act }, { data: hist }, { data: s }, { data: bc }, { data: config }, { data: items }, { data: usersData }, { data: fe }] = await Promise.all([
       supabase.from('sesiones').select("*").is("end_time", null).order("start_time", { ascending: false }),
       supabase.from('sesiones').select("*").not("end_time", "is", null).order("start_time", { ascending: false }).limit(100),
       supabase.from("settings").select("*").eq("key", "multiplier").maybeSingle(),
@@ -113,6 +118,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       supabase.from("app_config").select("*"),
       supabase.from("shop_items").select("*"),
       supabase.from('sesiones').select("user_name"),
+      supabase.from('fechas_especiales').select("*").order("fecha", { ascending: false }),
     ]);
     setActive((act ?? []) as Session[]);
     setHistory((hist ?? []) as Session[]);
@@ -140,6 +146,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       const uniqueNames = Array.from(new Set(usersData.map((u: any) => u.user_name))).filter(Boolean) as string[];
       setAllUsers(uniqueNames.sort());
     }
+    setFechasEspeciales(fe ?? []);
   };
 
   useEffect(() => {
@@ -149,36 +156,58 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
       return () => clearInterval(t);
     }
   }, [authed]);
+
   const tryAuth = async (passwordIngresada: string) => {
-  console.log("1. Intentando autenticar con:", passwordIngresada);
+    console.log("1. Intentando autenticar con:", passwordIngresada);
 
-  const { data, error } = await supabase
-    .from('app_config')
-    .select('valor')
-    .eq('key', 'admin_password')
-    .single();
+    const { data, error } = await supabase
+      .from('app_config')
+      .select('valor')
+      .eq('key', 'admin_password')
+      .single();
 
-  console.log("2. Respuesta cruda de Supabase - Error:", error);
-  console.log("3. Respuesta cruda de Supabase - Data:", data);
+    console.log("2. Respuesta cruda de Supabase - Error:", error);
+    console.log("3. Respuesta cruda de Supabase - Data:", data);
 
-  if (error || !data) {
-    console.log("⚠️ Falló la consulta a Supabase");
-    toast.error("Error al verificar credenciales de admin.");
-    return false;
-  }
+    if (error || !data) {
+      console.log("⚠️ Falló la consulta a Supabase");
+      toast.error("Error al verificar credenciales de admin.");
+      return false;
+    }
 
-  console.log("4. Comparando -> BD:", JSON.stringify(data.valor), "vs Ingresado:", JSON.stringify(passwordIngresada));
+    console.log("4. Comparando -> BD:", JSON.stringify(data.valor), "vs Ingresado:", JSON.stringify(passwordIngresada));
 
-  if (String(data.valor).trim() === String(passwordIngresada).trim()) {
-    console.log("✅ ¡Contraseña correcta!");
-    setAuthed(true);
-    return true;
-  } else {
-    console.log("❌ Contraseña incorrecta");
-    toast.error("Contraseña incorrecta");
-    return false;
-  }
-};
+    if (String(data.valor).trim() === String(passwordIngresada).trim()) {
+      console.log("✅ ¡Contraseña correcta!");
+      setAuthed(true);
+      return true;
+    } else {
+      console.log("❌ Contraseña incorrecta");
+      toast.error("Contraseña incorrecta");
+      return false;
+    }
+  };
+
+  // Funciones para Gestión de Fechas Especiales
+  const handleAddFechaEspecial = async () => {
+    if (!nuevaFecha) return toast.error("Selecciona una fecha");
+    const { error } = await supabase.from('fechas_especiales').insert({
+      fecha: nuevaFecha,
+      descripcion: nuevaDesc.trim() || "Feriado / Excepción"
+    });
+    if (error) return toast.error("Error al registrar (quizás ya existe)");
+    toast.success("Fecha especial agregada");
+    setNuevaFecha("");
+    setNuevaDesc("");
+    loadAll();
+  };
+
+  const handleDeleteFechaEspecial = async (id: string) => {
+    const { error } = await supabase.from('fechas_especiales').delete().eq("id", id);
+    if (error) return toast.error("Error al eliminar");
+    toast.success("Fecha eliminada");
+    loadAll();
+  };
 
   // Funciones para Gestión de Usuarios
   const handleRenameUser = async (oldName: string) => {
@@ -586,7 +615,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
         ) : (
           <Tabs defaultValue="live">
-            <TabsList className="grid w-full grid-cols-10 text-[11px]">
+            <TabsList className="grid w-full grid-cols-11 text-[11px]">
               <TabsTrigger value="live"><Activity className="mr-1 h-3 w-3" />Vivo</TabsTrigger>
               <TabsTrigger value="ranking"><Trophy className="mr-1 h-3 w-3" />Ranking</TabsTrigger>
               <TabsTrigger value="broadcast"><Megaphone className="mr-1 h-3 w-3" />Broad.</TabsTrigger>
@@ -594,6 +623,7 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
               <TabsTrigger value="shop"><ShoppingBag className="mr-1 h-3 w-3" />Tienda</TabsTrigger>
               <TabsTrigger value="restore"><Upload className="mr-1 h-3 w-3" />Restaurar</TabsTrigger>
               <TabsTrigger value="users"><Users className="mr-1 h-3 w-3" />Users</TabsTrigger>
+              <TabsTrigger value="fechas"><Calendar className="mr-1 h-3 w-3" />Excepciones</TabsTrigger>
               <TabsTrigger value="history"><History className="mr-1 h-3 w-3" />Hist.</TabsTrigger>
               <TabsTrigger value="past"><Archive className="mr-1 h-3 w-3" />Archivo</TabsTrigger>
               <TabsTrigger value="diag"><Terminal className="mr-1 h-3 w-3" />Diag</TabsTrigger>
@@ -1023,6 +1053,51 @@ export function AdminPanel({ open, onOpenChange }: { open: boolean; onOpenChange
                     ))}
                   </ul>
                 )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="fechas" className="mt-4 space-y-4">
+              <Card className="p-4 space-y-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Calendar className="h-4 w-4 text-primary" /> Fechas Especiales (No afectan racha)
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Agrega feriados o días particulares para que el cálculo de rachas los ignore automáticamente como si fueran fines de semana.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Input
+                    type="date"
+                    value={nuevaFecha}
+                    onChange={(e) => setNuevaFecha(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Motivo (ej: Feriado nacional)"
+                    value={nuevaDesc}
+                    onChange={(e) => setNuevaDesc(e.target.value)}
+                  />
+                  <Button onClick={handleAddFechaEspecial}>Agregar Fecha</Button>
+                </div>
+
+                <div className="space-y-2 mt-4">
+                  <h4 className="text-xs font-bold uppercase text-muted-foreground">Fechas registradas</h4>
+                  {fechasEspeciales.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No hay fechas especiales cargadas.</p>
+                  ) : (
+                    <ul className="divide-y divide-border max-h-60 overflow-y-auto space-y-2">
+                      {fechasEspeciales.map((f) => (
+                        <li key={f.id} className="flex items-center justify-between gap-2 pt-2 text-sm">
+                          <div>
+                            <span className="font-mono font-bold">{f.fecha}</span> · <span className="text-muted-foreground">{f.descripcion}</span>
+                          </div>
+                          <Button size="sm" variant="destructive" onClick={() => handleDeleteFechaEspecial(f.id)} className="h-7 px-2">
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </Card>
             </TabsContent>
 
