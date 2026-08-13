@@ -310,9 +310,16 @@ function Index() {
     broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastLoading, setBroadcastLoading] = useState(false);
 
-  // Función para comprobar y disparar el Screamer web al hacer Check-in consultando la galería dinámica
+ // Función para comprobar y disparar el Screamer web con logs de depuración
   const checkAndTriggerScreamerWeb = async (name: string) => {
+    if (!name) {
+      console.log('⚠️ checkAndTriggerScreamerWeb: No se pasó un nombre de usuario válido.');
+      return;
+    }
+
     try {
+      console.log(`🔍 Buscando sustos pendientes para: "${name}"...`);
+      
       const { data, error } = await supabase
         .from('pending_punishments')
         .select('*')
@@ -321,29 +328,64 @@ function Index() {
         .limit(1)
         .maybeSingle();
 
-      if (error || !data) return;
+      if (error) {
+        console.error('❌ Error de Supabase al buscar en pending_punishments:', error);
+        return;
+      }
 
-      await supabase
+      if (!data) {
+        console.log('✨ No hay sustos pendientes para este usuario.');
+        return;
+      }
+
+      console.log('🎯 ¡Susto pendiente encontrado! ID:', data.id);
+
+      // Actualizamos a true en la base de datos
+      const { error: updateError } = await supabase
         .from('pending_punishments')
         .update({ triggered: true })
         .eq('id', data.id);
 
-      const { data: galleryItems } = await supabase
+      if (updateError) {
+        console.error('❌ Error al actualizar triggered a true:', updateError);
+        return;
+      }
+
+      console.log('🔄 Marcado como triggered: true en la BD. Obteniendo galería...');
+
+      // Consultamos la galería de screamers
+      const { data: galleryItems, error: galleryError } = await supabase
         .from('screamer_gallery')
         .select('image_url, is_surprise')
         .eq('active', true);
 
-      if (!galleryItems || galleryItems.length === 0) return;
+      if (galleryError) {
+        console.error('❌ Error al consultar screamer_gallery (¿Problema de RLS?):', galleryError);
+        return;
+      }
 
+      if (!galleryItems || galleryItems.length === 0) {
+        console.warn('⚠️ La tabla screamer_gallery no devolvió ninguna imagen activa.');
+        return;
+      }
+
+      // Seleccionamos uno al azar
       const randomScreamer = galleryItems[Math.floor(Math.random() * galleryItems.length)];
+      console.log('👻 Susto seleccionado con éxito:', randomScreamer.image_url);
 
-      setScreamerData({ image: randomScreamer.image_url, is_surprise: randomScreamer.is_surprise });
+      // Seteamos los estados (usando image_url para que coincida con el componente visual)
+      setScreamerData({ 
+        image_url: randomScreamer.image_url, 
+        is_surprise: randomScreamer.is_surprise 
+      });
       setScreamerActive(true);
+      
+      console.log('🚀 ¡Estados de Screamer activados en la interfaz!');
+
     } catch (err) {
-      console.error('Error al comprobar sustos pendientes en web:', err);
+      console.error('💥 Error crítico en checkAndTriggerScreamerWeb:', err);
     }
   };
-
  
   const handleSendBroadcastWithMegaphone = async () => {
     if (!userName.trim()) {
