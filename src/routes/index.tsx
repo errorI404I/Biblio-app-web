@@ -386,71 +386,72 @@ function Index() {
     }
   };
  
-  const handleSendBroadcastWithMegaphone = async () => {
-    if (!userName.trim()) {
-      toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
-      return;
-    }
-    if (!broadcastMessage.trim()) {
-      toast.error("⚠️ Escribe un mensaje para el megáfono.");
-      return;
-    }
+  const handleSendBroadcastWithMegaphone = async (customText?: string) => {
+  const textToSend = customText || broadcastMessage;
 
-    setBroadcastLoading(true);
-    try {
-      // 1. Verificar inventario buscando el item con id 'megafono_anonimo'
-      const { data: inventoryItems, error: invError } = await supabase
-        .from('user_inventory')
-        .select('id')
-        .eq('user_name', userName)
-        .eq('item_id', 'megafono_anonimo')
-        .limit(1);
+  if (!userName.trim()) {
+    toast.error("⚠️ Ingresa tu nombre en el campo correspondiente.");
+    return;
+  }
+  if (!textToSend.trim()) {
+    toast.error("⚠️ Escribe un mensaje para el megáfono.");
+    return;
+  }
 
-      if (invError || !inventoryItems || inventoryItems.length === 0) {
-        toast.error("⚠️ No tienes megáfonos anónimos disponibles en tu inventario.");
-        setBroadcastLoading(false);
-        return;
-      }
+  setBroadcastLoading(true);
+  try {
+    // 1. Verificar inventario buscando el item con id 'megafono_anonimo'
+    const { data: inventoryItems, error: invError } = await supabase
+      .from('user_inventory')
+      .select('id')
+      .eq('user_name', userName)
+      .eq('item_id', 'megafono_anonimo')
+      .limit(1);
 
-      const itemToDeleteId = inventoryItems[0].id;
-
-      // 2. Consumir el ítem del inventario
-      const { error: deleteError } = await supabase
-        .from('user_inventory')
-        .delete()
-        .eq('id', itemToDeleteId);
-
-      if (deleteError) {
-        toast.error("❌ Error al descontar el megáfono.");
-        setBroadcastLoading(false);
-        return;
-      }
-
-      // 3. Insertar broadcast: 'message' para el banner y 'creador' para tu control
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-      const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
-        type: "text",
-        message: `📢 ${broadcastMessage}`, // Mensaje limpio, anónimo para el banner
-        creador: userName,                // Usuario guardado de forma interna para control
-        expires_at: expiresAt,
-      });
-
-      if (broadcastError) {
-        toast.error("❌ Error al publicar el mensaje.");
-        setBroadcastLoading(false);
-        return;
-      }
-
-      toast.success("📢 ¡Mensaje anónimo enviado!");
-      setBroadcastMessage('');
-    } catch (err) {
-      console.error('Error al enviar megáfono:', err);
-      toast.error("❌ Error inesperado.");
-    } finally {
+    if (invError || !inventoryItems || inventoryItems.length === 0) {
+      toast.error("⚠️ No tienes megáfonos anónimos disponibles en tu inventario.");
       setBroadcastLoading(false);
+      return;
     }
-  };
-  
+
+    const itemToDeleteId = inventoryItems[0].id;
+
+    // 2. Consumir el ítem del inventario
+    const { error: deleteError } = await supabase
+      .from('user_inventory')
+      .delete()
+      .eq('id', itemToDeleteId);
+
+    if (deleteError) {
+      toast.error("❌ Error al descontar el megáfono.");
+      setBroadcastLoading(false);
+      return;
+    }
+
+    // 3. Insertar broadcast: 'message' para el banner y 'creador' para tu control
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
+      type: "text",
+      message: `📢 ${textToSend.trim()}`, // Mensaje limpio, anónimo para el banner
+      creador: userName,                // Usuario guardado de forma interna para control
+      expires_at: expiresAt,
+    });
+
+    if (broadcastError) {
+      toast.error("❌ Error al publicar el mensaje.");
+      setBroadcastLoading(false);
+      return;
+    }
+
+    toast.success("📢 ¡Mensaje anónimo enviado!");
+    setBroadcastMessage('');
+  } catch (err) {
+    console.error('Error al enviar megáfono:', err);
+    toast.error("❌ Error inesperado.");
+  } finally {
+    setBroadcastLoading(false);
+  }
+};
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
