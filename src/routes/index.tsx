@@ -303,14 +303,13 @@ function Index() {
 
   // Estados para el Screamer en la Web (dinámico desde la BD)
   const [screamerActive, setScreamerActive] = useState(false);
-  const [screamerData, setScreamerData] = useState<{ image: string; isSurprise: boolean } | null>(null);
+  const [screamerData, setScreamerData] = useState<{ image_url: string; isSurprise: boolean } | null>(null);
 
   // Estado para el envío de Megáfonos globales desde la Web
-  const [
-    broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastLoading, setBroadcastLoading] = useState(false);
 
- // Función para comprobar y disparar el Screamer web con logs de depuración
+  // Función para comprobar y disparar el Screamer web con logs de depuración
   const checkAndTriggerScreamerWeb = async (name: string) => {
     if (!name) {
       console.log('⚠️ checkAndTriggerScreamerWeb: No se pasó un nombre de usuario válido.');
@@ -373,7 +372,7 @@ function Index() {
       const randomScreamer = galleryItems[Math.floor(Math.random() * galleryItems.length)];
       console.log('👻 Susto seleccionado con éxito:', randomScreamer.image_url);
 
-      // Seteamos los estados (usando image_url para que coincida con el componente visual)
+      // Seteamos los estados
       setScreamerData({ 
         image_url: randomScreamer.image_url, 
         is_surprise: randomScreamer.is_surprise 
@@ -399,7 +398,7 @@ function Index() {
 
     setBroadcastLoading(true);
     try {
-      // 1. Verificar inventario
+      // 1. Verificar inventario buscando el item con id 'megafono_anonimo'
       const { data: inventoryItems, error: invError } = await supabase
         .from('user_inventory')
         .select('id')
@@ -408,14 +407,14 @@ function Index() {
         .limit(1);
 
       if (invError || !inventoryItems || inventoryItems.length === 0) {
-        toast.error("⚠️ No tienes megáfonos disponibles.");
+        toast.error("⚠️ No tienes megáfonos anónimos disponibles en tu inventario.");
         setBroadcastLoading(false);
         return;
       }
 
       const itemToDeleteId = inventoryItems[0].id;
 
-      // 2. Consumir el ítem
+      // 2. Consumir el ítem del inventario
       const { error: deleteError } = await supabase
         .from('user_inventory')
         .delete()
@@ -427,12 +426,12 @@ function Index() {
         return;
       }
 
-      // 3. Insertar broadcast: 'message' para el banner (anónimo) y 'creador' para tu control
+      // 3. Insertar broadcast: 'message' para el banner y 'creador' para tu control
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
       const { error: broadcastError } = await (supabase as any).from("broadcasts").insert({
         type: "text",
-        message: `📢 ${broadcastMessage}`, // Mensaje limpio, sin nombre del usuario
-        creador: userName,                // El usuario queda guardado solo para tu control
+        message: `📢 ${broadcastMessage}`, // Mensaje limpio, anónimo para el banner
+        creador: userName,                // Usuario guardado de forma interna para control
         expires_at: expiresAt,
       });
 
@@ -451,7 +450,7 @@ function Index() {
       setBroadcastLoading(false);
     }
   };
-
+  
   // Hotkey Ctrl+Shift+A
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
